@@ -2,6 +2,40 @@
 PythonSmartKids
 
 
+# Math Learning API
+
+This project provides an API for tracking kids' math learning progress and using AI to suggest personalized questions.
+
+## Features
+- Submit math question attempts.
+- Store attempts in a SQLite database.
+- Use AI to analyze performance and suggest practice questions.
+
+## Setup
+
+1. Install dependencies:
+
+    ```sh
+    pip install -r requirements.txt
+    ```
+
+2. Initialize the database:
+
+    ```sh
+    python app/db/db_init.py
+    ```
+
+3. Run the API:
+
+    ```sh
+    uvicorn app.main:app --reload
+    ```
+
+4. API Endpoints:
+    - `POST /submit_attempt` - Submit a math question attempt.
+    - `GET /analyze_student/{student_id}` - Get AI-powered analysis for weak areas.
+
+
 Project Structure
 ```
 my_project/
