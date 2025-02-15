@@ -162,3 +162,8 @@ All API endpoints are well-documented using **Swagger**, ensuring ease of integr
 2. **Deploying the system for real-world usage.**  
 3. **Enhancing AI analysis with more question types and difficulty levels.**  
 
+
+#Deployments
+Render.com - fails due to card not accepting for some reason - https://dashboard.render.com/web/new?newUser=true
+railway.com -  success - https://pythonsmartkids-production.up.railway.app/docs - https://railway.com/project/7b2a55f8-4a56-443c-9e2d-91ed5e8c667f/service/4ad49022-6ac2-4675-a1c4-e69b3d69d3af?environmentId=928a35d5-6b21-4182-ab8e-1590766ccdec&id=73b675f7-2efd-4b30-96b7-0244c10077c6#build
+
