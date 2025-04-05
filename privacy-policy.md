@@ -100,10 +100,10 @@ To exercise these rights, please contact us using the information provided below
 
 If you have any questions or concerns about this Privacy Policy, please contact us at:
 
-[Your Company Name]  
-Email: [Your Contact Email]  
-Address: [Your Physical Address]  
-Phone: [Your Contact Number]
+SmartBoy
+Email: kdx.shaggy@gmail.com  
+Address: Colombo, SriLanka
+Phone: +94769105555
 
 ---
 
