@@ -74,7 +74,7 @@ my_project/
 │── scripts/                 # Deployment and automation scripts
 │   ├── setup_db.py
 │   ├── run_server.py
-│── .env                     # Environment variables
+│── .env                     # Environment variables 
 │── requirements.txt         # Python dependencies
 │── Dockerfile               # Docker configuration
 │── .gitignore               # Ignore files for Git
@@ -82,10 +82,12 @@ my_project/
 ```
 
 
-#Tools Used
+# .env
+- A plain text file that contains key-value pairs of environment variables.
+- Used to store sensitive information (e.g., database URLs, API keys).
+- Prevents hardcoding secrets in the source code.
+- Add .env to .gitignore to prevent committing secrets
 
-Git CLI
-https://cli.github.com/
 
 
 ---
@@ -142,7 +144,7 @@ This data is stored in our database for further analysis."
 ### **Key Technologies Used**
 "This project is built using:  
 - **FastAPI** – A modern and high-performance web framework.  
-- **PostgreSQL** – A reliable and scalable database.  
+- **SQLite3** –  A lightweight, file-based database for easy setup and testing.
 - **Qwen AI API** – For AI-powered student performance analysis.  
 - **Pytest** – For automated testing.  
 - **Docker** – For containerized deployment.  
@@ -162,3 +164,137 @@ All API endpoints are well-documented using **Swagger**, ensuring ease of integr
 2. **Deploying the system for real-world usage.**  
 3. **Enhancing AI analysis with more question types and difficulty levels.**  
 
+
+#Tools Used
+
+- Git CLI
+https://cli.github.com/
+- vs code extention: sqllite viwer
+
+#Notes
+sqlite3 is installed by default with python, so you don't need it in the requirements.txt
+
+# launch.json
+
+```
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: FastAPI",
+            "type": "python",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": [
+                "app.main:app",
+                "--reload",
+                "--host", "127.0.0.1",
+                "--port", "8000",
+                "--log-level", "debug"
+            ],
+            "env": {
+                "PYTHONUNBUFFERED": "1"
+            },
+            "jinja": true,
+            "justMyCode": false
+        }
+    ]
+}
+
+```
+
+to debug all files > "justMyCode": false
+
+or else below tooltip will appear when breakpoint hits
+```
+Breakpoint in file excluded by filters.
+Note: may be excluded because of "justMyCode" option (default == true).Try setting "justMyCode": false in the debug configuration (e.g., launch.json).
+```
+
+### **FastAPI Summary 🚀**  
+
+- **FastAPI** is a **high-performance, modern** Python web framework for building APIs.  
+- **Key Features:**  
+  - 🚀 **Blazing fast** (near Node.js & Go performance).  
+  - ✅ **Asynchronous support** (async/await for non-blocking operations).  
+  - 📜 **Automatic API docs** (Swagger UI & ReDoc).  http://127.0.0.1:8000/docs
+  ![alt text](image.png)
+  - 🔄 **Type hinting** for validation & serialization (via **Pydantic**).  
+  - 🔌 **Dependency Injection** for scalable architectures.  
+  - 🔒 **Built-in security** (OAuth2, JWT, API keys).  
+
+- **Example Usage:**
+  ```python
+  from fastapi import FastAPI
+  app = FastAPI()
+
+  @app.get("/")
+  async def read_root():
+      return {"message": "Hello, FastAPI!"}
+  ```
+
+- **How to Run FastAPI:**  
+  ```bash
+  uvicorn main:app --reload
+  ```
+  - Visit **http://127.0.0.1:8000/docs** for auto-generated API documentation.
+
+- **FastAPI vs Flask:**  
+  - 🏎️ **Faster** than Flask (async support).  
+  - ✅ **Type safety & validation** (Flask requires manual validation).  
+  - 🔥 **Better scalability** for microservices & modern web apps.  
+
+- **Best Use Cases:**  
+  - REST APIs & microservices.  
+  - High-performance applications.  
+  - Machine learning API deployments.  
+
+
+
+| **Rank** | **Framework**     | **Best For**                        | **Performance**   | **Async Support**  | **Learning Curve** | **Industry Use**                                | **Downsides** | **Popularity** |
+|---------|-------------------|-----------------------------------|------------------|-------------------|-------------------|------------------------------------------------|-------------|--------------|
+| **1️⃣** | **Flask** 🐍      | Simple APIs, microservices        | 🟡 Moderate      | ❌ No (Requires Flask-Async) | 🔹 Very Easy     | Popular for **startups, web services, microservices (Airbnb, Netflix, Lyft, Reddit)** | No **async** support, requires **extensions** for many features. | ⭐⭐⭐⭐⭐ Most Used |
+| **2️⃣** | **Django REST Framework (DRF)** 🏛️ | Large-scale web apps, CMS | 🟡 Moderate | ❌ No (Requires Django-Channels) | 🔸 Medium | Used in **enterprise applications, fintech, social media (Instagram, Pinterest, Spotify)** | Heavy framework, **slower than FastAPI**, complex for small projects. | ⭐⭐⭐⭐⭐ Widely Used |
+| **3️⃣** | **FastAPI** 🚀    | High-performance APIs, modern apps | ✅ Super Fast     | ✅ Built-in       | 🔹 Easy           | Used in **ML APIs, microservices, fintech, AI (Netflix, Uber, Stripe)** | Requires **Python 3.7+**, smaller ecosystem than Flask. | ⭐⭐⭐⭐ Rapid Growth |
+| **4️⃣** | **Express.js** 🛠️ | JavaScript APIs, microservices     | ✅ Fast          | ✅ Yes           | 🔹 Easy          | Used in **backend services, fintech, e-commerce (Uber, PayPal, IBM, Twitter)** | **Not Python-based**, lacks type safety. | ⭐⭐⭐⭐⭐ JavaScript Standard |
+| **5️⃣** | **Tornado** 🌪️   | Real-time apps (WebSockets, chat)  | ✅ Super Fast     | ✅ Full Async     | 🔺 Complex       | Used for **real-time applications, WebSockets, Quora, Facebook Chat** | Harder to learn, **less community support** than Flask/FastAPI. | ⭐⭐⭐ Specialized Use |
+| **6️⃣** | **Sanic** 🏃‍♂️    | Fast async APIs (Flask-like)      | ✅ Fast          | ✅ Full Async     | 🔺 Medium        | Used in **low-latency APIs, async applications** | **Smaller ecosystem**, less adoption than Flask/FastAPI. | ⭐⭐ Niche Adoption |
+| **7️⃣** | **Falcon** 🦅     | Minimalist APIs, microservices     | ✅ Fast          | ❌ No            | 🔺 Medium        | Used in **cloud services, LinkedIn, OpenStack** | No built-in **ORM**, lacks async support, **fewer libraries**. | ⭐ Less Popular |
+
+---
+
+### **📌 Key Takeaways**
+✅ **Most Used & In-Demand** → **Flask & Django REST Framework**  
+✅ **Fastest Growing** → **FastAPI (rising in industry demand)**  
+✅ **Best for Async Apps** → **FastAPI, Tornado, Sanic**  
+✅ **Best for Large Enterprise Apps** → **Django REST Framework**  
+✅ **Best for Real-Time WebSockets** → **Tornado**  
+✅ **Most Used Outside Python** → **Express.js (Node.js)**  
+
+### 
+New Problem Statement for next version of my app
+
+Context: Currently i am having a front end which an android app in the google play store.
+
+a. Types & Patterns
+All Question Types & Patterns should be updated and maintainable in a single source of truth in any suitable format.
+
+examples:
+type: algebra , pattern 1 : a + b = _
+type: fraction , pattern 2 : 3 / 2 = _
+
+b. Templates - Grouping of questions and parameters such difficulty, Subject, subtopic
+They should be stored in diffferent Templates. So, that for each template we can group certain types and patterns of Questions. Also we can increaes the difficulty level for each Template.
+
+examples:
+subject: maths
+template: simple algebra & fractions
+difficulty: grade 5 Level 1
+
+c. Historical data (if available)
+examples: students wrong answers & its questions
+
+d. Based on the a, b, c => send a request to a AI model API & get a response. Using the response, create a New Random Question paper for all given Question types & patterns.
+it should display the question with a question number and also provide a user input for the user to enter the answer.
+
+e. Once user answers the question. When the "Check Answers" button is clicked, it should display the user if the answer is correct on wrong. also show the correct answer if its wrong. and save the user entered answers aginst the studentId in a database which will be later used in (c)
