@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 def setup_supabase_schema():
     """
-    Attempt to connect to Supabase and provide setup instructions.
+    Attempt to connect to Supabase and set up the required schema.
     """
     load_dotenv()
     
@@ -44,13 +44,47 @@ def setup_supabase_schema():
             return True
         except Exception as e:
             if "relation" in str(e) and "does not exist" in str(e):
-                logger.info("Attempts table not found. You need to create it.")
-                show_manual_instructions()
+                logger.info("Attempts table not found. Creating it automatically...")
+                create_attempts_table(supabase)
             else:
                 logger.error(f"Error checking table: {e}")
                 show_manual_instructions()
     except Exception as e:
         logger.error(f"Failed to connect to Supabase: {e}")
+        show_manual_instructions()
+        return False
+
+def create_attempts_table(supabase):
+    """
+    Create the attempts table in Supabase.
+    """
+    try:
+        # Execute SQL to create the table and set up RLS
+        sql = """
+        CREATE TABLE attempts (
+            id SERIAL PRIMARY KEY,
+            student_id INTEGER NOT NULL,
+            datetime TIMESTAMP NOT NULL,
+            question TEXT NOT NULL,
+            is_answer_correct BOOLEAN NOT NULL,
+            incorrect_answer TEXT,
+            correct_answer TEXT NOT NULL
+        );
+        
+        -- Set up basic Row Level Security (RLS) policies
+        ALTER TABLE attempts ENABLE ROW LEVEL SECURITY;
+        CREATE POLICY "Allow anonymous select" ON attempts FOR SELECT USING (true);
+        CREATE POLICY "Allow anonymous insert" ON attempts FOR INSERT USING (true);
+        """
+        
+        # Execute SQL query using REST API since PostgreSQL SQL execution is not directly
+        # supported in the Python client
+        response = supabase.rpc('exec_sql', {'sql': sql}).execute()
+        
+        logger.info("Successfully created attempts table and set up RLS policies!")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to create attempts table: {e}")
         show_manual_instructions()
         return False
 
