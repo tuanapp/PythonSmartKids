@@ -1,0 +1,190 @@
+/* Reset default margin and padding */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background-color: #1c1c1c;
+    color: #e6e6e6;
+    font-family: Arial, sans-serif;
+    text-align: center;
+    padding: 20px;
+}
+
+/* Home Button Styles */
+.home-button {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    background-color: #4CAF50;
+    color: #fff;
+    padding: 10px;
+    border-radius: 10%;
+    text-decoration: none;
+    font-size: 1.2em;
+    z-index: 1000;
+}
+
+.home-button:hover {
+    background-color: #3e8e41;
+}
+
+h1 {
+    margin-top: 20px;
+    font-size: 2em;
+}
+
+#game-container {
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+#problem {
+    font-size: 3em;
+    margin-top: 20px;
+    word-wrap: break-word;
+}
+
+input[type="number"] {
+    font-size: 1.5em;
+    margin-top: 20px;
+    padding: 10px;
+    width: 100%;
+    max-width: 200px;
+    background-color: #2d2d2d;
+    color: #e6e6e6;
+    border: none;
+    border-radius: 5px;
+}
+
+input[type="tel"]:focus {
+    outline: none;
+    box-shadow: 0 0 5px #4CAF50;
+}
+
+button {
+    margin-top: 20px;
+    padding: 10px 20px;
+    font-size: 1.2em;
+    background-color: #4CAF50;
+    color: #e6e6e6;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+button:hover {
+    background-color: #3e8e41;
+}
+
+#result {
+    font-size: 1.5em;
+    margin-top: 20px;
+}
+
+#score,
+#timer {
+    font-size: 1.5em;
+    margin-top: 20px;
+    display: inline-block;
+    background-color: #2d2d2d;
+    padding: 10px;
+    border-radius: 5px;
+    margin: 10px 5px;
+}
+
+#motivation img {
+    max-width: 100%;
+    height: auto;
+    margin-top: 20px;
+}
+
+#incorrect-questions,
+#history {
+    text-align: left;
+    margin: 20px auto;
+    max-width: 800px;
+}
+
+#incorrect-questions h2,
+#history h2 {
+    font-size: 1.5em;
+    margin-bottom: 10px;
+}
+
+#incorrect-questions p,
+#history p {
+    font-size: 1em;
+    margin-bottom: 5px;
+}
+
+/* Pending Questions List */
+#pendingqlist-container {
+    text-align: center;
+    margin: 20px auto;
+    max-width: 800px;
+}
+
+#pendingqlist-container h2 {
+    font-size: 1.5em;
+    margin-bottom: 10px;
+}
+
+#pendingqlist {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.tag {
+    background-color: #4CAF50;
+    color: #fff;
+    padding: 5px 10px;
+    margin: 5px;
+    border-radius: 15px;
+    font-size: 0.9em;
+}
+
+/* Responsive Styles */
+@media (max-width: 600px) {
+    #problem {
+        font-size: 2em;
+    }
+
+    input[type="number"] {
+        font-size: 1.2em;
+        max-width: 100%;
+    }
+
+    button {
+        font-size: 1em;
+        padding: 8px 16px;
+    }
+
+    #score,
+    #timer {
+        font-size: 1.2em;
+        padding: 8px;
+    }
+
+    #result {
+        font-size: 1.2em;
+    }
+
+    .tag {
+        font-size: 0.8em;
+        padding: 4px 8px;
+        margin: 3px;
+    }
+
+    /* Adjust home button size on smaller screens */
+    .home-button {
+        padding: 8px;
+        font-size: 1em;
+        top: 10px;
+        left: 10px;
+    }
+}

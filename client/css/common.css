@@ -1,0 +1,410 @@
+.logo{
+    float: left;
+    top: 100px;
+}
+
+/* Reset default margin and padding */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    
+    font-family: Arial, sans-serif;
+    text-align: center;
+    /*padding: 20px;*/
+    padding: 5px;
+    /*background-color: black;
+    color: #ffffff;*/
+    background-color: #1c1c1c;
+    color: #e6e6e6;
+}
+
+/* Home Button Styles */
+.home-button {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    background-color: #4CAF50;
+    color: #fff;
+    padding: 10px;
+    border-radius: 10%;
+    text-decoration: none;
+    font-size: 1.2em;
+    z-index: 1000;
+}
+
+.home-button:hover {
+    background-color: #3e8e41;
+}
+
+h1 {
+    margin-top: 20px;
+    font-size: 2em;
+}
+
+#game-container {
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+#problem {
+    font-size: 3em;
+    margin-top: 20px;
+    word-wrap: break-word;
+}
+
+input[type="number"] {
+    font-size: 1.5em;
+    margin-top: 20px;
+    padding: 10px;
+    width: 100%;
+    max-width: 200px;
+    background-color: #2d2d2d;
+    /*color: #e6e6e6;*/
+        color: rgb(55, 91, 92);
+    border: none;
+    border-radius: 5px;
+}
+
+input[type="tel"]:focus {
+    outline: none;
+    box-shadow: 0 0 5px #4CAF50;
+}
+
+button {
+    margin-top: 20px;
+    padding: 10px 20px;
+    font-size: 1.2em;
+    background-color: #4CAF50;
+    color: #e6e6e6;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+button:hover {
+    background-color: #3e8e41;
+}
+
+#result {
+    font-size: 1.5em;
+    margin-top: 20px;
+}
+
+#score,
+#timer {
+    font-size: 1.5em;
+    margin-top: 20px;
+    display: inline-block;
+    background-color: #2d2d2d;
+    padding: 10px;
+    border-radius: 5px;
+    margin: 10px 5px;
+}
+
+#motivation img {
+    max-width: 100%;
+    height: auto;
+    margin-top: 20px;
+}
+
+#incorrect-questions,
+#history {
+    text-align: left;
+    margin: 20px auto;
+    max-width: 800px;
+}
+
+#incorrect-questions h2,
+#history h2 {
+    font-size: 1.5em;
+    margin-bottom: 10px;
+}
+
+#incorrect-questions p,
+#history p {
+    font-size: 1em;
+    margin-bottom: 5px;
+}
+
+/* Pending Questions List */
+#pendingqlist-container {
+    text-align: center;
+    margin: 20px auto;
+    max-width: 800px;
+}
+
+#pendingqlist-container h2 {
+    font-size: 1.5em;
+    margin-bottom: 10px;
+}
+
+#pendingqlist {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.tag {
+    background-color: #4CAF50;
+    color: #fff;
+    padding: 5px 10px;
+    margin: 5px;
+    border-radius: 15px;
+    font-size: 0.9em;
+}
+
+/* Responsive Styles */
+@media (max-width: 600px) {
+    #problem {
+        font-size: 2em;
+    }
+
+    input[type="number"] {
+        font-size: 1.2em;
+        max-width: 100%;
+    }
+
+    button {
+        font-size: 1em;
+        padding: 8px 16px;
+    }
+
+    #score,
+    #timer {
+        font-size: 1.2em;
+        padding: 8px;
+    }
+
+    #result {
+        font-size: 1.2em;
+    }
+
+    .tag {
+        font-size: 0.8em;
+        padding: 4px 8px;
+        margin: 3px;
+    }
+
+    /* Adjust home button size on smaller screens */
+    .home-button {
+        padding: 8px;
+        font-size: 1em;
+        top: 10px;
+        left: 10px;
+    }
+}
+
+
+
+/*======================*/
+
+
+
+        /* Styles for the settings toggle */
+        .settings-toggle {
+            position: fixed;
+            top: 85px;
+            right: 20px;
+            background-color: #FF69B4;
+            border: none;
+            color: white;
+            padding: 10px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 18px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: transform 0.2s ease;
+        }
+
+        .settings-toggle:hover {
+            transform: scale(1.1);
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        /* Reset default margin and padding */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+h1,h2,h3 {
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        /* Navigation Buttons */
+        .nav-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin: 10px 0;
+        }
+
+        .nav-buttons .btn {
+            margin: 5px;
+            text-decoration: none;
+            color: white;
+        }
+
+        /* Form Styling */
+        form {
+            margin: 0 auto;
+            width: 90%;
+            max-width: 800px;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .qrow {
+            flex: 1 1 calc(50% - 20px);
+            margin: 10px;
+            padding: 10px;
+            border: 1px solid #ffffff;
+            border-radius: 5px;
+        }
+
+        @media screen and (max-width: 600px) {
+            .qrow {
+                flex: 1 1 100%;
+            }
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: cadetblue;
+        }
+
+        input[type="number"] {
+            width: 100%;
+            padding: 5px;
+            margin-top: 5px;
+            background-color: lightgray;
+            letter-spacing: 0.15em;
+            font-weight: bold;
+        }
+
+        /* Button Styling */
+        .btn {
+            background-color: #FF69B4;
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            text-align: center;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bolder;
+            margin: 10px;
+            display: inline-block;
+            text-decoration: none;
+        }
+
+        .btn:active {
+            background-color: #a00083;
+        }
+
+        /* Centered Content */
+        .center {
+            margin: 0 auto;
+            width: 90%;
+            max-width: 800px;
+        }
+
+        /* Questions Container */
+        #questions-container {
+            color: white;
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+            /*padding-top: 10px;*/
+        }
+
+        .question {
+            margin: 20px auto;
+            font-size: 20px;
+            letter-spacing: 0.15em;
+            color: aquamarine;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .question hr {
+            flex-basis: 100%;
+            border: none;
+            border-top: 1px solid #ffffff;
+            margin-bottom: 10px;
+        }
+
+        .qlbl {
+            /*width: 100%;*/
+            font-size: 15px;
+            color: cadetblue;
+            margin-bottom: 5px;
+            padding-right: 3px;
+        }
+
+        .question input[type="tel"] {
+            flex: 1;
+            padding: 5px;
+            margin-left: 10px;
+            background-color: lightgray;
+            letter-spacing: 0.15em;
+            font-weight: bold;
+        }
+
+        .answer-input.answer-correct {
+            border: 2px solid green;
+        }
+
+        .answer-input.answer-incorrect {
+            border: 2px solid red;
+        }
+
+        .answer-message {
+            padding-top: 3px;
+            font-size: 14px;
+        }
+
+        .answer-message.answer-correct {
+            color: green;
+        }
+
+        .answer-message.answer-incorrect {
+            color: red;
+        }
+
+        /* Task List */
+        .task {
+            margin-bottom: 10px;
+            font-size: 18px;
+        }
+
+        input[type="checkbox"] {
+            margin-right: 5px;
+        }
+
+        /* Responsive Font Sizes */
+        @media screen and (max-width: 600px) {
+            .question {
+                font-size: 16px;
+            }
+
+            .btn {
+                font-size: 14px;
+                padding: 8px 16px;
+            }
+        }

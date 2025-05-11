@@ -1,2 +1,21 @@
-# Created by venv; see https://docs.python.org/3/library/venv.html
-*
+# Ignore Python virtual environment artifacts
+.venv/
+Include/
+Lib/
+Scripts/
+
+# Ignore Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ignore test cache and coverage reports
+.pytest_cache/
+.coverage
+
+# Ignore editor settings
+.vscode/
+
+# Keep all other files, including app/ source and tests/ folders
+!app/
+!app/tests/

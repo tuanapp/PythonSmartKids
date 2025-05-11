@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Grade 4 Math Questions</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="./css/all.min.css">
+    <link rel="stylesheet" href="./css/common.css">
+
+    <style>
+        
+    </style>
+</head>
+
+
+<body>
+        <img class="logo" src="images/logo.webp" alt="Smart Boy Logo" width="80" height="80">
+
+    <!-- Navigation Buttons -->
+    <div class="nav-buttons">
+        <a href="./v2/index.html" class="btn">Multiplication Time Game</a>
+        <a href="./v22/index.html" class="btn">Multiplication Range</a>
+        <a href="./v3/index.html" class="btn">Dictation</a>
+    </div>
+
+    <h3>SmartyBoy - Simple math generator 2.0 with AI</h3>
+    <button id="settings-button" class="settings-toggle">
+	<i class="fa-solid fa-gear"></i>
+    </button>
+
+    <!-- Settings Form -->
+    <form id="settings-form">	
+        <div class="qrow">
+            <label for="addition-digits">Addition: Maximum Digits</label>
+            <input type="number" id="addition-digits" min="2" value="3">
+        </div>
+        <div class="qrow">
+            <label for="subtraction-digits">Subtraction: Maximum Digits</label>
+            <input type="number" id="subtraction-digits" min="1" value="3">
+        </div>
+        <div class="qrow">
+            <label for="multiplication-digits">Multiplication: Maximum Digits</label>
+            <input type="number" id="multiplication-digits" min="1" value="3">
+        </div>
+        <div class="qrow">
+            <label for="division-digits">Division: Maximum Digits</label>
+            <input type="number" id="division-digits" min="1" value="2">
+        </div>
+        <button type="submit" class="btn">Generate Questions</button>
+    </form>
+
+    <div id="content-below-reset" class="hidden">
+        <div class="center">
+            <div id="questions-container"></div>
+            <hr>
+            <button id="check-answers" type="submit" class="btn" disabled>Check Answers</button>
+	    <button type="button" class="btn" onclick="resetApp()">Reset</button>
+            
+        </div>
+
+<!-- 
+	<h2>Daily Checklist</h2>
+		<div class="task">
+		<label>
+		    <input type="checkbox">
+		    Addition & Subtraction
+		</label>
+		</div>
+		<div class="task">
+		<label>
+		    <input type="checkbox">
+		    Multiplication
+		</label>
+		</div>
+		<div class="task">
+		<label>
+		    <input type="checkbox">
+		    Dictation
+		</label>
+		</div>
+ -->
+
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://127.0.0.1:8000';
+        
+        // Settings toggle logic
+        const settingsButton = document.getElementById('settings-button');
+        const settingsForm = document.getElementById('settings-form');
+        const contentBelowReset = document.getElementById('content-below-reset');
+
+        settingsButton.addEventListener('click', () => {
+            settingsForm.classList.toggle('hidden');
+        });
+
+        document.getElementById("settings-form").addEventListener("submit", function (event) {
+            debugger
+            event.preventDefault();
+
+            // Get or create student ID from localStorage
+            let studentId = localStorage.getItem('studentId');
+            if (!studentId) {
+                studentId = Math.floor(Math.random() * 1000000) + 1; // Generate random student ID
+                localStorage.setItem('studentId', studentId);
+            }
+
+            //temp
+            studentId = 613813;
+
+            let url = `${API_BASE_URL}/generate-questions/${studentId}`;
+            console.log(`Making request to: ${url}`);
+
+            fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => response.json())
+            .then(data => {                
+                if (data.questions) {
+                    displayQuestions(data.questions);
+                    document.getElementById("check-answers").disabled = false;
+                }
+                console.error(data);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Failed to generate questions. Please try again.');
+            });
+
+            settingsForm.classList.add('hidden');
+            contentBelowReset.classList.remove('hidden');
+        });
+
+        function displayQuestions(questions) {
+            var questionsContainer = document.getElementById("questions-container");
+            questionsContainer.innerHTML = "";
+            questionNum = 1; // Reset question number
+
+            for (const [questionType, question] of Object.entries(questions)) {
+                var qElm = createQuestionElement(questionType, question);
+                questionsContainer.appendChild(qElm);
+            }
+        }
+
+        var questionNum = 1;
+
+        function createQuestionElement(questionType, questionText) {
+            var questionElement = document.createElement("div");
+            questionElement.className = "question";
+
+            var hrElement = document.createElement("hr");
+            questionElement.appendChild(hrElement);
+
+            var questionLabel = document.createElement("div");
+            questionLabel.textContent = `${questionNum}) ${questionType}: `;
+            questionLabel.className = "qlbl";
+            questionElement.appendChild(questionLabel);
+
+            questionNum++;
+
+            var questionTextSpan = document.createElement("span");
+            questionTextSpan.textContent = questionText;
+            questionElement.appendChild(questionTextSpan);
+
+            var answerInput = document.createElement("input");
+            answerInput.type = "tel";
+            answerInput.className = "answer-input";
+            answerInput.pattern = "^-?[0-9]*$"; // Allow only numbers and minus sign
+            // Validate the input
+            answerInput.addEventListener("input", function () {
+                if (!/^-?\d*$/.test(this.value)) {
+                    this.value = this.value.slice(0, -1);
+                }
+            });
+            questionElement.appendChild(answerInput);
+
+            return questionElement;
+        }
+
+        document.getElementById("check-answers").addEventListener("click", function () {
+            debugger
+            var answerInputs = document.getElementsByClassName("answer-input");
+            let studentId = localStorage.getItem('studentId');
+
+            for (var i = 0; i < answerInputs.length; i++) {
+                var answerInput = answerInputs[i];
+                var questionType = answerInput.parentNode.querySelector(".qlbl").textContent;
+                var question = answerInput.parentNode.querySelector("span").textContent;
+                var userAnswer = parseInt(answerInput.value);
+                debugger
+                var correctAnswer = evaluateQuestion(questionType, question);
+
+                // Submit the attempt to the server
+                fetch(`${API_BASE_URL}/submit_attempt`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        student_id: parseInt(studentId),
+                        datetime: new Date().toISOString(),
+                        question: question,
+                        is_answer_correct: userAnswer === correctAnswer,
+                        incorrect_answer: userAnswer !== correctAnswer ? userAnswer.toString() : null,
+                        correct_answer: correctAnswer.toString()
+                    })
+                }).catch(error => console.error('Error submitting attempt:', error));
+
+                var answerElement = document.createElement("div");
+                answerElement.classList.add("answer-message");
+
+                if (userAnswer === correctAnswer) {
+                    answerInput.classList.add("answer-correct");
+                    answerElement.textContent = "Correct!";
+                    answerElement.classList.add("answer-correct");
+                } else {
+                    answerInput.classList.add("answer-incorrect");
+                    answerElement.textContent = "Incorrect! Answer is " + correctAnswer + ".";
+                    answerElement.classList.add("answer-incorrect");
+                }
+
+                answerInput.after(answerElement);
+            }
+
+            // Disable the button after checking the answers
+            //document.getElementById("check-answers").disabled = true;
+        });
+
+        function evaluateQuestion(questionType, question) {
+            /*// First normalize the division and multiplication symbols and ensure proper spacing
+            question = question.replace(/\s+/g, ' ').trim();
+            
+            // Split into operands, handling both ASCII and Unicode symbols
+            let operands;
+            if (question.includes('×')) {
+                operands = question.split('×').map(item => parseInt(item.trim()) || 0);
+            } else if (question.includes('÷')) {
+                operands = question.split('÷').map(item => parseInt(item.trim()) || 0);
+            } else {
+                operands = question.split(/\+|\-|\=/).map(item => parseInt(item.trim()) || 0);
+            }*/
+            
+            var operands = question.split(/\+|\-|\×|\÷|\=/).map(function (item) {
+                return parseInt(item.trim()) || 0;
+            });
+            var operand1 = operands[0];
+            var operand2 = operands[1];
+            var operand3 = operands[2] || 0;
+
+
+            console.log('Question:', question, 'Operands:', operands); // Debug log
+            
+            /*var operand1 = operands[0];
+            var operand2 = operands[1];
+            var operand3 = operands[2] || 0;*/
+
+            // Additional validation with specific error messages
+            if (!operand1 && operand1 !== 0) {
+                console.error('Missing first operand:', operands);
+            }
+            if (!operand2 && operand2 !== 0) {
+                console.error('Missing second operand:', operands);
+            }
+
+            if (questionType.includes("AdditionX")) {
+                return operand3 - operand2;
+            } else if (questionType.includes("SubtractionX")) {
+                return operand3 + operand2;
+            } else if (questionType.includes("Addition")) {
+                return operand1 + operand2;
+            } else if (questionType.includes("Subtraction")) {
+                return operand1 - operand2;
+            } else if (questionType.includes("Multiplication")) {
+                return operand1 * operand2;
+            } else if (questionType.includes("Division")) {
+                if (operand2 === 0) {
+                    console.error('Division by zero!');
+                    return 0;
+                }
+                return operand1 / operand2;
+            }
+        }
+
+        /* Local Storage Mechanism */
+        function resetApp() {
+            localStorage.clear();
+            //location.reload();
+            contentBelowReset.classList.add('hidden');
+settingsButton.click();
+        }
+
+        function fetchQuestion(key, val) {
+            if (!isRandomValueExpired(key)) {
+                var storedValue = localStorage.getItem(key);
+                return storedValue;
+            } else {
+                storeRandomValue(key, val);
+                return val;
+            }
+        }
+
+        function storeRandomValue(key, val) {
+            localStorage.setItem(key, val);
+        }
+
+        function isRandomValueExpired(key) {
+            var expirationDate = localStorage.getItem('expirationDate');
+            if (expirationDate) {
+                return new Date().getTime() > parseInt(expirationDate);
+            }
+            return true;
+        }
+
+        function setExpired() {
+            var expirationDate = new Date();
+            expirationDate.setDate(expirationDate.getDate() + 1);
+            localStorage.setItem('expirationDate', expirationDate.getTime());
+        }
+    </script>
+</body>
+
+</html>
