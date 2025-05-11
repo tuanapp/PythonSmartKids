@@ -1,0 +1,218 @@
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from unittest.mock import patch, MagicMock
+from app.api.routes import router
+from app.models.schemas import MathAttempt
+import datetime
+
+# Create a test FastAPI app
+app = FastAPI()
+app.include_router(router)
+
+# Test client fixture
+@pytest.fixture
+def client():
+    return TestClient(app)
+
+# Integration Tests
+@pytest.mark.integration
+def test_submit_and_generate(client):
+    """
+    Integration test that tests submitting an attempt and then generating questions.
+    This test uses more realistic mocks that preserve the interaction between components.
+    """
+    with patch("app.repositories.db_service.save_attempt") as mock_save_attempt, \
+         patch("app.repositories.db_service.get_attempts") as mock_get_attempts, \
+         patch("app.services.ai_service.generate_practice_questions") as mock_generate_questions:
+        
+        # First submit an attempt
+        attempt_data = {
+            "student_id": 1,
+            "question": "2+2",
+            "is_answer_correct": True,
+            "incorrect_answer": "",
+            "correct_answer": "4",
+            "datetime": "2023-01-01T12:00:00"
+        }
+        submit_response = client.post("/submit_attempt", json=attempt_data)
+        assert submit_response.status_code == 200
+        
+        # Then generate questions
+        mock_get_attempts.return_value = [
+            {
+                "question": "2+2",
+                "is_correct": True,
+                "incorrect_answer": "",
+                "correct_answer": "4", 
+                "datetime": "2023-01-01T12:00:00"
+            }
+        ]
+        mock_generate_questions.return_value = {
+            "questions": {
+                "Addition": "3+3",
+                "Subtraction": "5-2"
+            },
+            "timestamp": None
+        }
+        
+        generate_response = client.post("/generate-questions/1")
+        assert generate_response.status_code == 200
+        
+        # Verify the response contains questions
+        questions = generate_response.json()["questions"]
+        assert isinstance(questions, dict)
+        assert len(questions) > 0
+
+@pytest.mark.integration
+def test_full_api_flow(client):
+    """
+    A more comprehensive integration test that tests the entire API flow.
+    """
+    # This would typically use more extensive mocks or actual test databases
+    with patch("app.repositories.db_service.save_attempt") as mock_save_attempt, \
+         patch("app.repositories.db_service.get_attempts") as mock_get_attempts, \
+         patch("app.services.ai_service.generate_practice_questions") as mock_generate_questions, \
+         patch("app.services.ai_service.get_analysis") as mock_get_analysis:
+        
+        # Submit an attempt
+        attempt_data = {
+            "student_id": 1,
+            "question": "2+2",
+            "is_answer_correct": True,
+            "incorrect_answer": "",
+            "correct_answer": "4",
+            "datetime": "2023-01-01T12:00:00"
+        }
+        client.post("/submit_attempt", json=attempt_data)
+        
+        # Mock attempt retrieval
+        mock_get_attempts.return_value = [
+            {
+                "question": "2+2",
+                "is_correct": True,
+                "incorrect_answer": "",
+                "correct_answer": "4", 
+                "datetime": "2023-01-01T12:00:00"
+            }
+        ]
+        
+        # Mock analysis generation
+        mock_get_analysis.return_value = {
+            "strengths": ["addition"],
+            "weaknesses": [],
+            "recommendations": ["Try more complex addition"]
+        }
+        
+        # Test analyze endpoint
+        analyze_response = client.get("/analyze_student/1")
+        assert analyze_response.status_code == 200
+        analysis = analyze_response.json()
+        assert "strengths" in analysis
+        
+        # Mock generated questions
+        mock_generate_questions.return_value = {
+            "questions": {
+                "Addition": "3+3",
+                "AdditionX": "__ + 2 = 5",
+                "Multiplication": "4×5",
+                "Division": "10÷2"
+            },
+            "timestamp": None
+        }
+        
+        # Generate new questions
+        generate_response = client.post("/generate-questions/1")
+        assert generate_response.status_code == 200
+        questions = generate_response.json()
+        assert "questions" in questions
+        # Just check that we have some questions, don't check the exact number
+        assert len(questions["questions"]) >= 1
+
+@pytest.mark.integration
+def test_analyze_and_generate_cycle(client):
+    """
+    Integration test that simulates a typical usage pattern:
+    1. Submit an attempt
+    2. Analyze the student performance 
+    3. Generate new questions based on analysis
+    """
+    with patch("app.repositories.db_service.save_attempt") as mock_save_attempt, \
+         patch("app.repositories.db_service.get_attempts") as mock_get_attempts, \
+         patch("app.services.ai_service.get_analysis") as mock_get_analysis, \
+         patch("app.services.ai_service.generate_practice_questions") as mock_generate_questions:
+        
+        # Submit multiple attempts
+        for question, correct_answer, is_answer_correct, incorrect_answer in [
+            ("2+2", "4", True, ""),
+            ("3+5", "8", True, ""),
+            ("7-3", "4", False, "5")
+        ]:
+            attempt_data = {
+                "student_id": 1,
+                "question": question,
+                "is_answer_correct": is_answer_correct,
+                "correct_answer": correct_answer,
+                "incorrect_answer": incorrect_answer,
+                "datetime": "2023-01-01T12:00:00"
+            }
+            client.post("/submit_attempt", json=attempt_data)
+        
+        # Mock attempts retrieval for both endpoints
+        attempts = [
+            {
+                "question": "2+2", 
+                "is_correct": True, 
+                "incorrect_answer": "",
+                "correct_answer": "4", 
+                "datetime": "2023-01-01T12:00:00"
+            },
+            {
+                "question": "3+5", 
+                "is_correct": True, 
+                "incorrect_answer": "",
+                "correct_answer": "8",  
+                "datetime": "2023-01-01T12:00:00"
+            },
+            {
+                "question": "7-3", 
+                "is_correct": False, 
+                "incorrect_answer": "5",
+                "correct_answer": "4", 
+                "datetime": "2023-01-01T12:00:00"
+            }
+        ]
+        mock_get_attempts.return_value = attempts
+        
+        # Mock analysis
+        analysis_result = {
+            "strengths": ["addition"],
+            "weaknesses": ["subtraction"],
+            "recommendations": ["Practice more subtraction"]
+        }
+        mock_get_analysis.return_value = analysis_result
+        
+        # Get analysis
+        analyze_response = client.get("/analyze_student/1")
+        assert analyze_response.status_code == 200
+        analysis = analyze_response.json()
+        assert analysis["weaknesses"] == ["subtraction"]
+        
+        # Mock generated questions focusing on weaknesses - match the actual structure
+        mock_generate_questions.return_value = {
+            "questions": {
+                "Subtraction": "9-4",
+                "SubtractionX": "10-7",
+                "Addition": "5+3"
+            },
+            "timestamp": None
+        }
+        
+        # Generate new questions
+        generate_response = client.post("/generate-questions/1")
+        assert generate_response.status_code == 200
+        questions = generate_response.json()["questions"]
+        
+        # Check for the presence of subtraction questions, not a specific key
+        has_subtraction_question = any("Subtraction" in key for key in questions.keys())
+        assert has_subtraction_question  # Checking if questions target weaknesses
