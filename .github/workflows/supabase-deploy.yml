@@ -17,6 +17,14 @@ jobs:
         with:
           python-version: '3.13'
           
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+          
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -28,6 +36,7 @@ jobs:
           version: latest
           
       - name: Run database setup
+        id: db_setup
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -36,12 +45,25 @@ jobs:
           python setup_supabase_schema.py
           
       - name: Run database migrations
+        if: success() && steps.db_setup.outcome == 'success'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           DATABASE_PROVIDER: supabase
+          DATABASE_URL: ${{ secrets.DATABASE_URL || '' }}
         run: |
           if [ -d "migrations" ] && [ -f "migrations/alembic.ini" ]; then
-            # Don't cd into migrations, run alembic from the project root with the config file path
+            # Run alembic from the project root with the config file path
             alembic -c migrations/alembic.ini upgrade head
           fi
+          
+      - name: Check for deployment success
+        if: ${{ success() }}
+        run: |
+          echo "✅ Deployment to Supabase successful!"
+          
+      - name: Handle deployment failure
+        if: ${{ failure() }}
+        run: |
+          echo "❌ Deployment to Supabase failed!"
+          # You could add notification steps here
