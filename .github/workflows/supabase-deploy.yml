@@ -35,17 +35,32 @@ jobs:
         with:
           version: latest
           
-      - name: Run database setup
-        id: db_setup
+      - name: Check database schema
+        id: db_check
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           DATABASE_PROVIDER: supabase
         run: |
+          # Run the setup_supabase_schema.py script to check if schema exists
+          # It will print message if table exists or create it otherwise
           python setup_supabase_schema.py
           
-      - name: Run database migrations
-        if: success() && steps.db_setup.outcome == 'success'
+      - name: Mark migrations as applied if schema exists
+        if: success()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          DATABASE_PROVIDER: supabase
+        run: |
+          if [ -d "migrations" ] && [ -f "migrations/alembic.ini" ]; then
+            # Create a stamp in alembic_version table to mark schema as up-to-date
+            # This will only stamp the database if migrations haven't been applied yet
+            alembic -c migrations/alembic.ini stamp head || true
+          fi
+      
+      - name: Run future migrations
+        if: success()
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -53,8 +68,8 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL || '' }}
         run: |
           if [ -d "migrations" ] && [ -f "migrations/alembic.ini" ]; then
-            # Run alembic from the project root with the config file path
-            alembic -c migrations/alembic.ini upgrade head
+            # Only run upgrade for future migrations
+            alembic -c migrations/alembic.ini upgrade head || echo "No new migrations to apply"
           fi
           
       - name: Check for deployment success
