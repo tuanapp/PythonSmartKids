@@ -6,6 +6,35 @@ from app.db.db_interface import DatabaseProvider
 
 logger = logging.getLogger(__name__)
 
+def execute_supabase_sql(supabase_client: Client, sql: str) -> Any:
+    """
+    Execute a raw SQL query against Supabase database using the RPC function.
+    Used by Alembic migrations.
+    
+    Args:
+        supabase_client: The Supabase client instance
+        sql: The SQL query to execute
+        
+    Returns:
+        The response from Supabase
+        
+    Raises:
+        Exception: If the SQL execution fails
+    """
+    logger.debug(f"Executing SQL via Supabase RPC: {sql[:100]}...")
+    try:
+        # Use the rpc function to execute SQL
+        response = supabase_client.rpc('exec_sql', {'sql': sql}).execute()
+        
+        if hasattr(response, 'error') and response.error:
+            raise Exception(f"Supabase SQL execution error: {response.error}")
+            
+        return response
+    except Exception as e:
+        logger.error(f"Error executing SQL via Supabase: {e}")
+        logger.error(f"SQL query: {sql[:200]}...")
+        raise
+
 class SupabaseProvider(DatabaseProvider):
     """Supabase implementation of the database provider."""
     

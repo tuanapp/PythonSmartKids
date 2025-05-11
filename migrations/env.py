@@ -14,9 +14,25 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 # access to the values within the .ini file in use.
 config = context.config
 
-# Import and configure the database models
-from app.config import DATABASE_URL
-config.set_main_option('sqlalchemy.url', DATABASE_URL)
+# Import and configure the database URL
+from app.config import DATABASE_URL, DATABASE_PROVIDER, SUPABASE_URL, SUPABASE_KEY, POSTGRES_CONNECTION_STRING
+
+# Configure the database URL based on the provider
+if DATABASE_PROVIDER == 'supabase' and POSTGRES_CONNECTION_STRING:
+    # If direct Postgres connection string is available, use it for migrations
+    config.set_main_option('sqlalchemy.url', POSTGRES_CONNECTION_STRING)
+elif DATABASE_PROVIDER == 'supabase':
+    from postgrest import APIResponse
+    from supabase import create_client
+    import urllib.parse
+    
+    # For Supabase without direct connection, use placeholder connection string
+    # This will be replaced by custom connection handling in run_migrations_online
+    pg_url = f"postgresql://postgres:placeholder@localhost:5432/postgres"
+    config.set_main_option('sqlalchemy.url', pg_url)
+else:
+    # For SQLite or other direct database connections
+    config.set_main_option('sqlalchemy.url', DATABASE_URL)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -64,6 +80,64 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    # For Supabase without direct Postgres connection string
+    if DATABASE_PROVIDER == 'supabase' and not POSTGRES_CONNECTION_STRING:
+        try:
+            from app.db.supabase_provider import execute_supabase_sql
+            
+            # Initialize Supabase client
+            supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+            
+            # Use a custom implementation to execute the migrations via REST API
+            class SupabaseConnection:
+                def execute(self, sql, *args, **kwargs):
+                    return execute_supabase_sql(supabase, sql)
+                
+                def commit(self):
+                    pass
+                
+                def close(self):
+                    pass
+            
+            class SupabaseExecutionContext:
+                def __init__(self):
+                    self.connection = SupabaseConnection()
+                
+                def begin_transaction(self):
+                    return self
+                
+                def __enter__(self):
+                    return self
+                
+                def __exit__(self, exc_type, exc_val, exc_tb):
+                    pass
+                
+                def execute(self, sql, *args, **kwargs):
+                    return self.connection.execute(sql)
+                
+                def run_migrations(self):
+                    # Each migration will be executed separately via the REST API
+                    for migration in context.get_revision_map().iterate_revisions('base', 'head'):
+                        context._migrations_fn(migration, context)
+            
+            # Configure the context with our custom connection
+            supabase_context = SupabaseExecutionContext()
+            context.configure(
+                connection=supabase_context.connection,
+                target_metadata=target_metadata,
+                version_table="alembic_version",
+            )
+            
+            # Run migrations
+            with supabase_context:
+                supabase_context.run_migrations()
+                
+            return
+        except Exception as e:
+            print(f"Error connecting to Supabase: {e}")
+            # Continue with standard approach as fallback
+            
+    # Standard SQLAlchemy approach for direct database connections
     connectable = engine_from_config(
         config.get_section(config.config_ini_section),
         prefix="sqlalchemy.",
