@@ -1,0 +1,13 @@
+.venv/
+Include/
+Lib/
+Scripts/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+*.db
+.coverage
+test*.py
