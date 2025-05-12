@@ -6,6 +6,7 @@ import pytest
 import datetime
 import uuid
 import os
+import psycopg2
 from dotenv import load_dotenv
 from app.db.neon_provider import NeonProvider
 from app.models.schemas import MathAttempt
@@ -19,6 +20,9 @@ NEON_USER = os.getenv("NEON_USER", "tuanapp")
 NEON_PASSWORD = os.getenv("NEON_PASSWORD", "HdzrNIKh5mM1")
 NEON_HOST = os.getenv("NEON_HOST", "ep-sparkling-butterfly-33773987-pooler.ap-southeast-1.aws.neon.tech")
 NEON_SSLMODE = os.getenv("NEON_SSLMODE", "require")
+
+# Define a fixed student ID for testing insert and delete operations
+FIXED_STUDENT_ID = 9999999
 
 @pytest.fixture
 def neon_provider():
@@ -36,6 +40,20 @@ def neon_provider():
 def unique_student_id():
     """Generate a unique student ID for test isolation."""
     return int(uuid.uuid4().int % 100000000)  # Ensure it's a reasonable-sized integer
+
+@pytest.fixture
+def neon_connection():
+    """Create a direct connection to the Neon PostgreSQL database."""
+    conn = psycopg2.connect(
+        dbname=NEON_DBNAME,
+        user=NEON_USER,
+        password=NEON_PASSWORD,
+        host=NEON_HOST,
+        sslmode=NEON_SSLMODE
+    )
+    conn.autocommit = True  # Set autocommit for this connection
+    yield conn
+    conn.close()
 
 @pytest.mark.integration
 @pytest.mark.neon
@@ -120,3 +138,67 @@ def test_database_connection(neon_provider):
         assert result[0] == 1, "Database connection test failed"
     except Exception as e:
         pytest.fail(f"Database connection failed with error: {e}")
+
+@pytest.mark.integration
+@pytest.mark.neon
+def test_insert_fixed_record(neon_provider):
+    """Test inserting a record with a fixed student ID."""
+    # First, clean up any existing records with this student ID
+    conn = psycopg2.connect(
+        dbname=NEON_DBNAME,
+        user=NEON_USER,
+        password=NEON_PASSWORD,
+        host=NEON_HOST,
+        sslmode=NEON_SSLMODE
+    )
+    conn.autocommit = True
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM attempts WHERE student_id = %s", (FIXED_STUDENT_ID,))
+    cursor.close()
+    conn.close()
+    
+    # Create a test attempt with the fixed student ID
+    test_attempt = MathAttempt(
+        student_id=FIXED_STUDENT_ID,
+        question="10+15",
+        is_answer_correct=True,
+        incorrect_answer=None,
+        correct_answer="25",
+        datetime=datetime.datetime.now()
+    )
+    
+    # Save the attempt to Neon
+    neon_provider.save_attempt(test_attempt)
+    
+    # Verify by retrieving the record
+    attempts = neon_provider.get_attempts(FIXED_STUDENT_ID)
+    assert len(attempts) > 0, "No attempt was saved with the fixed student ID"
+    
+    # Verify the content of the saved attempt
+    latest_attempt = attempts[0]
+    assert latest_attempt["question"] == "10+15"
+    assert latest_attempt["is_correct"] is True
+    assert latest_attempt["correct_answer"] == "25"
+    print(f"Successfully inserted record with fixed student ID: {FIXED_STUDENT_ID}")
+
+@pytest.mark.integration
+@pytest.mark.neon
+def test_delete_fixed_record(neon_connection):
+    """Test deleting a record with a fixed student ID."""
+    cursor = neon_connection.cursor()
+    
+    # First verify that the record exists
+    cursor.execute("SELECT COUNT(*) FROM attempts WHERE student_id = %s", (FIXED_STUDENT_ID,))
+    count_before = cursor.fetchone()[0]
+    assert count_before > 0, f"No records found with student ID {FIXED_STUDENT_ID} to delete"
+    
+    # Delete the record(s)
+    cursor.execute("DELETE FROM attempts WHERE student_id = %s", (FIXED_STUDENT_ID,))
+    
+    # Verify deletion
+    cursor.execute("SELECT COUNT(*) FROM attempts WHERE student_id = %s", (FIXED_STUDENT_ID,))
+    count_after = cursor.fetchone()[0]
+    cursor.close()
+    
+    assert count_after == 0, f"Failed to delete all records with student ID {FIXED_STUDENT_ID}"
+    print(f"Successfully deleted records with fixed student ID: {FIXED_STUDENT_ID}")
