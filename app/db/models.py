@@ -1,4 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, create_engine
+from sqlalchemy.dialects.postgresql import UUID
+import uuid
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.config import DATABASE_URL
@@ -17,6 +19,15 @@ class Attempt(Base):
     is_answer_correct = Column(Boolean, nullable=False)
     incorrect_answer = Column(Text)
     correct_answer = Column(Text, nullable=False)
+
+class QuestionPattern(Base):
+    """SQLAlchemy model for question patterns."""
+    __tablename__ = "question_patterns"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    type = Column(String, nullable=False)  # e.g., 'algebra', 'fraction'
+    pattern_text = Column(Text, nullable=False)  # e.g., 'a + b = _'
+    created_at = Column(DateTime(timezone=True), nullable=False)
 
 def get_engine():
     """Get a SQLAlchemy engine instance."""

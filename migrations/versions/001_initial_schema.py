@@ -27,7 +27,14 @@ def upgrade() -> None:
         sa.Column('correct_answer', sa.Text(), nullable=False),
         sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('question_patterns',
+        sa.Column('id', sa.dialects.postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column('type', sa.String(), nullable=False),
+        sa.Column('pattern_text', sa.Text(), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False)
+    )
 
 
 def downgrade() -> None:
+    op.drop_table('question_patterns')
     op.drop_table('attempts')

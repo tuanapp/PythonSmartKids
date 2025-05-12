@@ -19,3 +19,8 @@ class DatabaseProvider(ABC):
     def get_attempts(self, student_id: int) -> List[Dict[str, Any]]:
         """Retrieve attempts for a specific student."""
         pass
+
+    @abstractmethod
+    def get_question_patterns(self) -> List[Dict[str, Any]]:
+        """Retrieve all question patterns."""
+        pass

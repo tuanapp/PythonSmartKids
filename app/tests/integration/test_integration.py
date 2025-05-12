@@ -216,3 +216,69 @@ def test_analyze_and_generate_cycle(client):
         # Check for the presence of subtraction questions, not a specific key
         has_subtraction_question = any("Subtraction" in key for key in questions.keys())
         assert has_subtraction_question  # Checking if questions target weaknesses
+
+@pytest.mark.integration
+def test_question_patterns_endpoint(client):
+    """
+    Integration test for the question patterns endpoint
+    """
+    with patch("app.repositories.db_service.get_question_patterns") as mock_get_patterns:
+        # Mock patterns
+        mock_patterns = [
+            {
+                "id": "123e4567-e89b-12d3-a456-426614174000",
+                "type": "algebra",
+                "pattern_text": "a + b = _",
+                "created_at": "2023-01-01T12:00:00"
+            },
+            {
+                "id": "223e4567-e89b-12d3-a456-426614174001",
+                "type": "fraction",
+                "pattern_text": "_ / _ = 1",
+                "created_at": "2023-01-01T12:00:00"
+            }
+        ]
+        mock_get_patterns.return_value = mock_patterns
+        
+        # Test the endpoint
+        response = client.get("/question-patterns")
+        assert response.status_code == 200
+        
+        # Verify response structure
+        patterns = response.json()
+        assert len(patterns) == 2
+        assert all(key in patterns[0] for key in ["id", "type", "pattern_text", "created_at"])
+        assert patterns[0]["type"] == "algebra"
+        assert patterns[1]["type"] == "fraction"
+
+@pytest.mark.integration
+def test_question_patterns_endpoint_empty(client):
+    """
+    Integration test for the question patterns endpoint when no patterns exist
+    """
+    with patch("app.repositories.db_service.get_question_patterns") as mock_get_patterns:
+        # Mock empty patterns list
+        mock_get_patterns.return_value = []
+        
+        # Test the endpoint
+        response = client.get("/question-patterns")
+        assert response.status_code == 200
+        
+        # Verify empty response
+        patterns = response.json()
+        assert isinstance(patterns, list)
+        assert len(patterns) == 0
+
+@pytest.mark.integration
+def test_question_patterns_endpoint_error(client):
+    """
+    Integration test for the question patterns endpoint error handling
+    """
+    with patch("app.repositories.db_service.get_question_patterns") as mock_get_patterns:
+        # Mock database error
+        mock_get_patterns.side_effect = Exception("Database error")
+        
+        # Test the endpoint
+        response = client.get("/question-patterns")
+        assert response.status_code == 500
+        assert "Failed to retrieve question patterns" in response.json()["detail"]

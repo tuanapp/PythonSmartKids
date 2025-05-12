@@ -1,4 +1,5 @@
 import logging
+from app.db.models import QuestionPattern
 from app.models.schemas import MathAttempt
 from app.db.db_factory import DatabaseFactory
 
@@ -29,6 +30,16 @@ def get_attempts(student_id: int):
         return attempts
     except Exception as e:
         logger.error(f"Error retrieving attempts: {e}")
+        raise
+
+def get_question_patterns():
+    """Retrieve all question patterns using the configured database provider."""
+    try:
+        patterns = db_provider.get_question_patterns()
+        logger.debug(f"Retrieved {len(patterns)} question patterns")
+        return patterns
+    except Exception as e:
+        logger.error(f"Error retrieving question patterns: {e}")
         raise
 
 # Initialize the database when this module is imported

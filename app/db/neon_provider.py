@@ -6,6 +6,7 @@ from datetime import datetime
 
 from app.models.schemas import MathAttempt
 from app.db.db_interface import DatabaseProvider
+from app.db.models import QuestionPattern
 
 logger = logging.getLogger(__name__)
 
@@ -134,4 +135,25 @@ class NeonProvider(DatabaseProvider):
             
         except Exception as e:
             logger.error(f"Error retrieving attempts from Neon: {e}")
+            raise Exception(f"Database error: {e}")
+
+    def get_question_patterns(self):
+        """Retrieve all question patterns from the database."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            # Query to fetch all question patterns
+            cursor.execute("""
+                SELECT id, type, pattern_text, created_at
+                FROM question_patterns
+            """)
+
+            patterns = cursor.fetchall()
+            cursor.close()
+            conn.close()
+
+            return patterns
+        except Exception as e:
+            logger.error(f"Error retrieving question patterns: {e}")
             raise Exception(f"Database error: {e}")

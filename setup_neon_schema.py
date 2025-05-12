@@ -61,6 +61,22 @@ def setup_neon_schema():
         else:
             logger.info("Attempts table not found. Creating it...")
             create_attempts_table(cursor)
+        
+        # Check if the question_patterns table exists
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'question_patterns'
+            )
+        """)
+        table_exists = cursor.fetchone()[0]
+        
+        if table_exists:
+            logger.info("Question patterns table already exists in Neon PostgreSQL.")
+        else:
+            logger.info("Question patterns table not found. Creating it...")
+            create_question_patterns_table(cursor)
             
         cursor.close()
         conn.close()
@@ -97,6 +113,29 @@ def create_attempts_table(cursor):
         show_manual_instructions()
         return False
 
+def create_question_patterns_table(cursor):
+    """
+    Create the question_patterns table in Neon PostgreSQL.
+    """
+    try:
+        # Create the table
+        cursor.execute("""
+            CREATE TABLE public.question_patterns (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                type TEXT NOT NULL,
+                pattern_text TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        
+        logger.info("Successfully created question_patterns table!")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to create question_patterns table: {e}")
+        show_manual_instructions()
+        return False
+
 def show_manual_instructions():
     """
     Show instructions for manually creating the schema in Neon PostgreSQL.
@@ -117,6 +156,13 @@ def show_manual_instructions():
     print("    is_answer_correct BOOLEAN NOT NULL,")
     print("    incorrect_answer TEXT,")
     print("    correct_answer TEXT NOT NULL")
+    print(");")
+    print()
+    print("CREATE TABLE public.question_patterns (")
+    print("    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),")
+    print("    type TEXT NOT NULL,")
+    print("    pattern_text TEXT NOT NULL,")
+    print("    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()")
     print(");")
     print("```")
     print()

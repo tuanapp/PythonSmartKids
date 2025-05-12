@@ -37,3 +37,21 @@ async def generate_questions(student_id: int):
     except Exception as e:
         logger.error(f"Error generating questions: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/question-patterns")
+async def get_question_patterns():
+    """API endpoint to retrieve all question patterns."""
+    try:
+        patterns = db_service.get_question_patterns()
+        return [
+            {
+                "id": pattern["id"],
+                "type": pattern["type"],
+                "pattern_text": pattern["pattern_text"],
+                "created_at": pattern["created_at"]
+            }
+            for pattern in patterns
+        ]
+    except Exception as e:
+        logger.error(f"Error retrieving question patterns: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve question patterns")

@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from app.repositories.db_service import get_attempts, save_attempt
+from app.repositories.db_service import get_attempts, save_attempt, get_question_patterns
 from app.models.schemas import MathAttempt
 import datetime
 
@@ -106,3 +106,65 @@ class TestDBService:
         # Call the function and check it handles the exception
         with pytest.raises(Exception):
             save_attempt(attempt)
+    
+    @patch('app.repositories.db_service.db_provider')
+    def test_get_question_patterns(self, mock_db_provider):
+        """
+        Test retrieving question patterns from the database
+        """
+        # Configure mock to return some patterns
+        mock_patterns = [
+            {
+                "id": "123e4567-e89b-12d3-a456-426614174000",
+                "type": "algebra",
+                "pattern_text": "a + b = _",
+                "created_at": "2023-01-01T12:00:00"
+            },
+            {
+                "id": "223e4567-e89b-12d3-a456-426614174001",
+                "type": "fraction",
+                "pattern_text": "_ / _ = 1",
+                "created_at": "2023-01-01T12:00:00"
+            }
+        ]
+        mock_db_provider.get_question_patterns.return_value = mock_patterns
+        
+        # Call the function
+        results = get_question_patterns()
+        
+        # Assertions
+        assert len(results) == 2
+        assert results[0]["type"] == "algebra"
+        assert results[0]["pattern_text"] == "a + b = _"
+        assert results[1]["type"] == "fraction"
+        
+        # Verify database provider was called correctly
+        mock_db_provider.get_question_patterns.assert_called_once()
+    
+    @patch('app.repositories.db_service.db_provider')
+    def test_get_question_patterns_empty(self, mock_db_provider):
+        """
+        Test retrieving question patterns when there are none in the database
+        """
+        # Configure mock to return no patterns
+        mock_db_provider.get_question_patterns.return_value = []
+        
+        # Call the function
+        results = get_question_patterns()
+        
+        # Assertions
+        assert isinstance(results, list)
+        assert len(results) == 0
+        mock_db_provider.get_question_patterns.assert_called_once()
+    
+    @patch('app.repositories.db_service.db_provider')
+    def test_get_question_patterns_handles_error(self, mock_db_provider):
+        """
+        Test error handling when retrieving question patterns fails
+        """
+        # Setup mock to raise an exception
+        mock_db_provider.get_question_patterns.side_effect = Exception("Database error")
+        
+        # Call the function and check it handles the exception
+        with pytest.raises(Exception):
+            get_question_patterns()

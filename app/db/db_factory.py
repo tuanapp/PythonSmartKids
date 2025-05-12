@@ -1,12 +1,13 @@
 import logging
-from app.config import DATABASE_PROVIDER, NEON_DBNAME, NEON_USER, NEON_PASSWORD, NEON_HOST, NEON_SSLMODE
+import os
+from app.config import DATABASE_PROVIDER, NEON_SSLMODE
 from app.db.db_interface import DatabaseProvider
 from app.db.neon_provider import NeonProvider
 
 logger = logging.getLogger(__name__)
 
 class DatabaseFactory:
-    """Factory class to create database provider instances."""
+    """Factory for creating database providers."""
     
     _instance = None
     
@@ -20,12 +21,29 @@ class DatabaseFactory:
         """
         if DatabaseFactory._instance is None:
             if DATABASE_PROVIDER.lower() == "neon":
-                logger.info(f"Using Neon PostgreSQL database at {NEON_HOST}")
+                logger.info("Using Neon PostgreSQL database")
+                
+                # Get Neon connection details from environment variables
+                dbname = os.getenv("NEON_DBNAME")
+                user = os.getenv("NEON_USER")
+                password = os.getenv("NEON_PASSWORD")
+                host = os.getenv("NEON_HOST")
+                
+                # Validate required environment variables
+                if not all([dbname, user, password, host]):
+                    missing_vars = [var for var, val in {
+                        "NEON_DBNAME": dbname,
+                        "NEON_USER": user,
+                        "NEON_PASSWORD": password,
+                        "NEON_HOST": host
+                    }.items() if not val]
+                    raise Exception(f"Missing required environment variables: {', '.join(missing_vars)}")
+                
                 DatabaseFactory._instance = NeonProvider(
-                    dbname=NEON_DBNAME,
-                    user=NEON_USER,
-                    password=NEON_PASSWORD,
-                    host=NEON_HOST,
+                    dbname=dbname,
+                    user=user,
+                    password=password,
+                    host=host,
                     sslmode=NEON_SSLMODE
                 )
             else:
