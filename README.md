@@ -305,3 +305,9 @@ d. Based on the a, b, c => send a request to a AI model API & get a response. Us
 it should display the question with a question number and also provide a user input for the user to enter the answer.
 
 e. Once user answers the question. When the "Check Answers" button is clicked, it should display the user if the answer is correct on wrong. also show the correct answer if its wrong. and save the user entered answers aginst the studentId in a database which will be later used in (c)
+
+
+
+Free Hosted Deployments:
+1. Python backend API hosted in https://vercel.com/tuans-projects-b937be10/python-smart-kids
+2. database hosted in https://console.neon.tech/app/projects/dark-hill-03559036/branches/br-withered-block-05263935/tables?database=smartboydb
