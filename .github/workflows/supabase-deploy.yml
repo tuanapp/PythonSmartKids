@@ -28,16 +28,12 @@ jobs:
         with:
           version: latest
           
-      - name: Set environment variables
-        run: |
-          echo "DATABASE_PROVIDER=supabase" >> $GITHUB_ENV
-          echo "POSTGRES_CONNECTION_STRING=postgresql://postgres.apifyzsbctxzfwrqkcqb:${{ secrets.SUPABASE_DB_PASSWORD }}@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres" >> $GITHUB_ENV
-          
       - name: Mark migrations as applied
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           DATABASE_PROVIDER: supabase
+          POSTGRES_CONNECTION_STRING: postgresql://postgres.apifyzsbctxzfwrqkcqb:${{ secrets.SUPABASE_DB_PASSWORD }}@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres
         run: |
           alembic -c migrations/alembic.ini stamp head
           
@@ -46,6 +42,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           DATABASE_PROVIDER: supabase
+          POSTGRES_CONNECTION_STRING: postgresql://postgres.apifyzsbctxzfwrqkcqb:${{ secrets.SUPABASE_DB_PASSWORD }}@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres
         run: |
           alembic -c migrations/alembic.ini upgrade head
           
