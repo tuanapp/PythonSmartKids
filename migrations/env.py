@@ -84,12 +84,17 @@ def run_migrations_online() -> None:
     if DATABASE_PROVIDER == 'supabase' and not POSTGRES_CONNECTION_STRING:
         try:
             from app.db.supabase_provider import execute_supabase_sql
+            from sqlalchemy.dialects import postgresql
             
             # Initialize Supabase client
             supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
             
             # Use a custom implementation to execute the migrations via REST API
             class SupabaseConnection:
+                def __init__(self):
+                    # Add dialect attribute that SQLAlchemy expects
+                    self.dialect = postgresql.dialect()
+                
                 def execute(self, sql, *args, **kwargs):
                     return execute_supabase_sql(supabase, sql)
                 
@@ -98,6 +103,14 @@ def run_migrations_online() -> None:
                 
                 def close(self):
                     pass
+                    
+                # Add other required SQLAlchemy connection methods/properties
+                @property
+                def closed(self):
+                    return False
+                    
+                def begin(self):
+                    return self
             
             class SupabaseExecutionContext:
                 def __init__(self):
@@ -126,6 +139,7 @@ def run_migrations_online() -> None:
                 connection=supabase_context.connection,
                 target_metadata=target_metadata,
                 version_table="alembic_version",
+                include_schemas=True,
             )
             
             # Run migrations
