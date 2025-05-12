@@ -307,7 +307,14 @@ it should display the question with a question number and also provide a user in
 e. Once user answers the question. When the "Check Answers" button is clicked, it should display the user if the answer is correct on wrong. also show the correct answer if its wrong. and save the user entered answers aginst the studentId in a database which will be later used in (c)
 
 
-
 Free Hosted Deployments:
-1. Python backend API hosted in https://vercel.com/tuans-projects-b937be10/python-smart-kids
-2. database hosted in https://console.neon.tech/app/projects/dark-hill-03559036/branches/br-withered-block-05263935/tables?database=smartboydb
+1. Andrid frontend
+code @ https://github.com/tuanapp/SmartBoy_Capacitor
+hosted @ playstore
+dev @ C:\Private\GIT\SmartBoy_Capacitor_2
+2. 
+Python backend API - https://github.com/tuanapp/PythonSmartKids
+hosted @ https://vercel.com/tuans-projects-b937be10/python-smart-kids
+Database 
+hosted @ https://console.neon.tech/app/projects/dark-hill-03559036/branches/br-withered-block-05263935/tables?database=smartboydb
+dev @ C:\Private\GIT\PythonSmartKids
