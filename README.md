@@ -8,7 +8,7 @@ This project provides an API for tracking kids' math learning progress and using
 
 ## Features
 - Submit math question attempts.
-- Store attempts in a SQLite database.
+- Store attempts in a database.
 - Use AI to analyze performance and suggest practice questions.
 
 ## Setup
@@ -144,7 +144,6 @@ This data is stored in our database for further analysis."
 ### **Key Technologies Used**
 "This project is built using:  
 - **FastAPI** – A modern and high-performance web framework.  
-- **SQLite3** –  A lightweight, file-based database for easy setup and testing.
 - **Qwen AI API** – For AI-powered student performance analysis.  
 - **Pytest** – For automated testing.  
 - **Docker** – For containerized deployment.  
@@ -179,7 +178,7 @@ https://cli.github.com/
 - vs code extention: sqllite viwer
 
 #Notes
-sqlite3 is installed by default with python, so you don't need it in the requirements.txt
+
 
 # launch.json
 
