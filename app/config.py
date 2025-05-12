@@ -5,12 +5,14 @@ load_dotenv()
 
 # Database settings
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///math_attempts.db")
-DATABASE_PROVIDER = os.getenv("DATABASE_PROVIDER", "sqlite")  # Options: sqlite, supabase
+DATABASE_PROVIDER = os.getenv("DATABASE_PROVIDER", "neon")  # Options: sqlite, neon
 
-# Supabase specific settings
-SUPABASE_URL = os.getenv("SUPABASE_URL", "https://apifyzsbctxzfwrqkcqb.supabase.co")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFwaWZ5enNiY3R4emZ3cnFrY3FiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY4NzMyNTEsImV4cCI6MjA2MjQ0OTI1MX0.teB3iEL-cAozLxZOyPVMOB7JHOIba7eMTRbUMXAeL0A")
-POSTGRES_CONNECTION_STRING = os.getenv("POSTGRES_CONNECTION_STRING", "")
+# Neon PostgreSQL specific settings
+NEON_DBNAME = os.getenv("NEON_DBNAME", "smartboydb")
+NEON_USER = os.getenv("NEON_USER", "tuanapp")
+NEON_PASSWORD = os.getenv("NEON_PASSWORD", "HdzrNIKh5mM1")
+NEON_HOST = os.getenv("NEON_HOST", "ep-sparkling-butterfly-33773987-pooler.ap-southeast-1.aws.neon.tech")
+NEON_SSLMODE = os.getenv("NEON_SSLMODE", "require")
 
 # OpenAI settings
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")

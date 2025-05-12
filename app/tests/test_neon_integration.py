@@ -1,0 +1,122 @@
+"""
+Integration tests for directly interacting with the Neon PostgreSQL database.
+These tests perform real operations against the database without mocks.
+"""
+import pytest
+import datetime
+import uuid
+import os
+from dotenv import load_dotenv
+from app.db.neon_provider import NeonProvider
+from app.models.schemas import MathAttempt
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Get Neon credentials from environment variables or use defaults
+NEON_DBNAME = os.getenv("NEON_DBNAME", "smartboydb")
+NEON_USER = os.getenv("NEON_USER", "tuanapp")
+NEON_PASSWORD = os.getenv("NEON_PASSWORD", "HdzrNIKh5mM1")
+NEON_HOST = os.getenv("NEON_HOST", "ep-sparkling-butterfly-33773987-pooler.ap-southeast-1.aws.neon.tech")
+NEON_SSLMODE = os.getenv("NEON_SSLMODE", "require")
+
+@pytest.fixture
+def neon_provider():
+    """Fixture to provide a configured Neon PostgreSQL provider."""
+    provider = NeonProvider(
+        dbname=NEON_DBNAME,
+        user=NEON_USER,
+        password=NEON_PASSWORD,
+        host=NEON_HOST,
+        sslmode=NEON_SSLMODE
+    )
+    return provider
+
+@pytest.fixture
+def unique_student_id():
+    """Generate a unique student ID for test isolation."""
+    return int(uuid.uuid4().int % 100000000)  # Ensure it's a reasonable-sized integer
+
+@pytest.mark.integration
+@pytest.mark.neon
+def test_insert_attempt_to_neon(neon_provider, unique_student_id):
+    """Test directly inserting a record into the Neon PostgreSQL attempts table."""
+    # Create a test attempt with a timestamp that will be easily identifiable
+    test_attempt = MathAttempt(
+        student_id=unique_student_id,
+        question="5+7",
+        is_answer_correct=True,
+        incorrect_answer=None,
+        correct_answer="12",
+        datetime=datetime.datetime.now()
+    )
+    
+    # Save the attempt to Neon
+    neon_provider.save_attempt(test_attempt)
+    
+    # Verify by retrieving and checking if at least one attempt exists
+    attempts = neon_provider.get_attempts(unique_student_id)
+    assert len(attempts) > 0, "No attempts were saved to Neon PostgreSQL"
+    
+    # Verify the content of the saved attempt
+    latest_attempt = attempts[0]  # Should be the most recent one
+    assert latest_attempt["question"] == "5+7"
+    assert latest_attempt["is_correct"] is True
+    assert latest_attempt["correct_answer"] == "12"
+
+@pytest.mark.integration
+@pytest.mark.neon
+def test_read_attempt_from_neon(neon_provider, unique_student_id):
+    """Test reading records from the Neon PostgreSQL attempts table."""
+    # Create a few test attempts with different data
+    for i, (question, answer, is_correct) in enumerate([
+        ("2+2", "4", True),
+        ("3+5", "8", True),
+        ("7-3", "4", False)
+    ]):
+        attempt = MathAttempt(
+            student_id=unique_student_id,
+            question=question,
+            is_answer_correct=is_correct,
+            incorrect_answer="5" if not is_correct else None,
+            correct_answer=answer,
+            datetime=datetime.datetime.now() + datetime.timedelta(minutes=i)
+        )
+        neon_provider.save_attempt(attempt)
+    
+    # Read all attempts for this student
+    attempts = neon_provider.get_attempts(unique_student_id)
+    
+    # Verify the number of attempts retrieved
+    assert len(attempts) >= 3, "Not all test attempts were retrieved"
+    
+    # Due to ordering by datetime desc, the attempts should be in reverse order
+    assert attempts[0]["question"] == "7-3"
+    assert attempts[0]["is_correct"] is False
+    
+    # Check a specific field in the second attempt
+    assert attempts[1]["question"] == "3+5"
+    assert attempts[1]["correct_answer"] == "8"
+
+@pytest.mark.integration
+@pytest.mark.neon
+def test_database_connection(neon_provider):
+    """Test basic database connection and initialization."""
+    try:
+        # Initialize the database (this should create the table if it doesn't exist)
+        neon_provider.init_db()
+        
+        # Get a connection to verify it works
+        conn = neon_provider._get_connection()
+        cursor = conn.cursor()
+        
+        # Run a simple query to check connection
+        cursor.execute("SELECT 1")
+        result = cursor.fetchone()
+        
+        cursor.close()
+        conn.close()
+        
+        assert result[0] == 1, "Database connection test failed"
+    except Exception as e:
+        pytest.fail(f"Database connection failed with error: {e}")

@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 from datetime import datetime
 
 from app.db.sqlite_provider import SQLiteProvider
-from app.db.supabase_provider import SupabaseProvider
+from app.db.neon_provider import NeonProvider
 from app.models.schemas import MathAttempt
 
 class TestSQLiteProvider:
@@ -113,39 +113,57 @@ class TestSQLiteProvider:
         assert attempts[0]['question'] == '4+4'
 
 
-class TestSupabaseProvider:
-    """Tests for the Supabase database provider."""
+class TestNeonProvider:
+    """Tests for the Neon PostgreSQL database provider."""
     
-    @patch('app.db.supabase_provider.create_client')
-    def test_init_db(self, mock_create_client):
-        """Test database initialization with Supabase."""
-        mock_client = MagicMock()
-        # Configure the mock to not have an error attribute
-        mock_response = MagicMock()
-        mock_response.error = None
-        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = mock_response
-        mock_create_client.return_value = mock_client
+    @patch('app.db.neon_provider.psycopg2.connect')
+    def test_init_db(self, mock_connect):
+        """Test database initialization with Neon PostgreSQL."""
+        # Setup mock connection and cursor
+        mock_cursor = MagicMock()
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_connect.return_value = mock_conn
         
-        provider = SupabaseProvider('fake_url', 'fake_key')
+        provider = NeonProvider(
+            dbname="test_db",
+            user="test_user",
+            password="test_password",
+            host="test_host",
+            sslmode="require"
+        )
         provider.init_db()
         
-        # Verify Supabase client was created
-        mock_create_client.assert_called_once_with('fake_url', 'fake_key')
-        # Verify the connection check was performed
-        mock_client.table.assert_called_with('attempts')
+        # Verify connection was made with correct parameters
+        mock_connect.assert_called_once_with(
+            dbname="test_db",
+            user="test_user",
+            password="test_password",
+            host="test_host",
+            sslmode="require"
+        )
+        
+        # Verify the table creation was attempted
+        mock_cursor.execute.assert_called()
+        mock_conn.commit.assert_called_once()
     
-    @patch('app.db.supabase_provider.create_client')
-    def test_save_attempt(self, mock_create_client):
-        """Test saving an attempt to Supabase."""
-        # Setup mock client
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.error = None  # Ensure error is explicitly None
-        mock_client.table.return_value.insert.return_value.execute.return_value = mock_response
-        mock_create_client.return_value = mock_client
+    @patch('app.db.neon_provider.psycopg2.connect')
+    def test_save_attempt(self, mock_connect):
+        """Test saving an attempt to Neon PostgreSQL."""
+        # Setup mock connection and cursor
+        mock_cursor = MagicMock()
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_connect.return_value = mock_conn
         
         # Create provider
-        provider = SupabaseProvider('fake_url', 'fake_key')
+        provider = NeonProvider(
+            dbname="test_db",
+            user="test_user",
+            password="test_password",
+            host="test_host",
+            sslmode="require"
+        )
         
         # Create test attempt
         test_datetime = datetime(2023, 1, 1, 12, 0, 0)
@@ -161,56 +179,80 @@ class TestSupabaseProvider:
         # Save the attempt
         provider.save_attempt(attempt)
         
-        # Verify Supabase client was called correctly
-        mock_client.table.assert_called_with('attempts')
-        mock_client.table().insert.assert_called_once()
+        # Verify the database connection was made
+        mock_connect.assert_called_once()
         
-        # Get the data that was passed to insert
-        call_args = mock_client.table().insert.call_args[0][0]
-        assert call_args['student_id'] == 1
-        assert call_args['question'] == "1+1"
-        assert call_args['is_answer_correct'] == True
-        assert call_args['correct_answer'] == "2"
-        assert call_args['incorrect_answer'] == ""
-        assert call_args['datetime'] == test_datetime.isoformat()
+        # Verify cursor.execute was called to insert data
+        mock_cursor.execute.assert_called_once()
+        
+        # Get the parameters that were passed to execute
+        call_args = mock_cursor.execute.call_args[0]
+        # First argument is SQL query, second is parameters
+        params = call_args[1]
+        assert params[0] == 1  # student_id
+        assert params[1] == test_datetime  # datetime
+        assert params[2] == "1+1"  # question
+        assert params[3] == True  # is_answer_correct
+        assert params[4] == ""  # incorrect_answer
+        assert params[5] == "2"  # correct_answer
+        
+        # Verify commit was called
+        mock_conn.commit.assert_called_once()
     
-    @patch('app.db.supabase_provider.create_client')
-    def test_get_attempts(self, mock_create_client):
-        """Test retrieving attempts from Supabase."""
-        # Setup mock client and response
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.error = None  # Ensure error is explicitly None
-        mock_response.data = [
+    @patch('app.db.neon_provider.psycopg2.connect')
+    def test_get_attempts(self, mock_connect):
+        """Test retrieving attempts from Neon PostgreSQL."""
+        # Setup mock cursor with test data
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = [
             {
                 'question': '2+2',
                 'is_answer_correct': True,
                 'incorrect_answer': '',
                 'correct_answer': '4',
-                'datetime': '2023-01-01T12:00:00'
+                'datetime': datetime(2023, 1, 1, 12, 0, 0)
             },
             {
                 'question': '3+3',
                 'is_answer_correct': False,
                 'incorrect_answer': '7',
                 'correct_answer': '6',
-                'datetime': '2023-01-01T12:05:00'
+                'datetime': datetime(2023, 1, 1, 12, 5, 0)
             }
         ]
-        mock_client.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = mock_response
-        mock_create_client.return_value = mock_client
+        
+        # Setup mock connection
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_connect.return_value = mock_conn
         
         # Create provider
-        provider = SupabaseProvider('fake_url', 'fake_key')
+        provider = NeonProvider(
+            dbname="test_db",
+            user="test_user",
+            password="test_password",
+            host="test_host",
+            sslmode="require"
+        )
         
         # Get attempts
         attempts = provider.get_attempts(1)
         
-        # Verify Supabase client was called correctly
-        mock_client.table.assert_called_with('attempts')
-        mock_client.table().select.assert_called_once()
+        # Verify the connection was made
+        mock_connect.assert_called_once()
         
-        # Verify the returned data
+        # Verify cursor was created with the right factory
+        mock_conn.cursor.assert_called_once()
+        
+        # Verify query execution
+        mock_cursor.execute.assert_called_once()
+        
+        # Check that the student_id parameter was used in the query
+        call_args = mock_cursor.execute.call_args[0]
+        params = call_args[1]
+        assert params[0] == 1  # student_id
+        
+        # Verify the returned data structure
         assert len(attempts) == 2
         assert attempts[0]['question'] == '2+2'
         assert attempts[0]['is_correct'] == True

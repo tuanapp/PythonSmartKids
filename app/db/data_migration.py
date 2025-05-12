@@ -3,32 +3,38 @@ import sqlite3
 from datetime import datetime
 import os
 
-from app.config import DATABASE_URL, SUPABASE_URL, SUPABASE_KEY
+from app.config import DATABASE_URL, NEON_DBNAME, NEON_USER, NEON_PASSWORD, NEON_HOST, NEON_SSLMODE
 from app.db.sqlite_provider import SQLiteProvider
-from app.db.supabase_provider import SupabaseProvider
+from app.db.neon_provider import NeonProvider
 from app.models.schemas import MathAttempt
 
 logger = logging.getLogger(__name__)
 
-def migrate_sqlite_to_supabase():
+def migrate_sqlite_to_neon():
     """
-    Migrate data from SQLite database to Supabase.
+    Migrate data from SQLite database to Neon PostgreSQL.
     
     This function reads all data from the SQLite database
-    and writes it to the Supabase database.
+    and writes it to the Neon PostgreSQL database.
     """
     try:
         # Initialize providers
         sqlite_path = DATABASE_URL.replace("sqlite:///", "")
         sqlite_provider = SQLiteProvider(sqlite_path)
-        supabase_provider = SupabaseProvider(SUPABASE_URL, SUPABASE_KEY)
+        neon_provider = NeonProvider(
+            dbname=NEON_DBNAME,
+            user=NEON_USER,
+            password=NEON_PASSWORD,
+            host=NEON_HOST,
+            sslmode=NEON_SSLMODE
+        )
         
         # Check if the SQLite file exists
         if not os.path.exists(sqlite_path):
             logger.error(f"SQLite database file not found: {sqlite_path}")
             return False
         
-        logger.info(f"Starting migration from SQLite ({sqlite_path}) to Supabase ({SUPABASE_URL})")
+        logger.info(f"Starting migration from SQLite ({sqlite_path}) to Neon PostgreSQL")
         
         # Connect to SQLite and fetch all attempts
         conn = sqlite3.connect(sqlite_path)
@@ -43,7 +49,7 @@ def migrate_sqlite_to_supabase():
         
         logger.info(f"Found {len(rows)} records to migrate")
         
-        # Insert each record into Supabase
+        # Insert each record into Neon PostgreSQL
         for i, row in enumerate(rows):
             try:
                 # Parse the datetime string to a datetime object
@@ -65,8 +71,8 @@ def migrate_sqlite_to_supabase():
                     correct_answer=row['correct_answer']
                 )
                 
-                # Save to Supabase
-                supabase_provider.save_attempt(attempt)
+                # Save to Neon PostgreSQL
+                neon_provider.save_attempt(attempt)
                 
                 if (i + 1) % 10 == 0:
                     logger.info(f"Migrated {i + 1}/{len(rows)} records")
@@ -74,40 +80,43 @@ def migrate_sqlite_to_supabase():
             except Exception as e:
                 logger.error(f"Error migrating record {i}: {e}")
         
-        logger.info(f"Migration completed. {len(rows)} records transferred to Supabase.")
+        logger.info(f"Migration completed. {len(rows)} records transferred to Neon PostgreSQL.")
         return True
     except Exception as e:
         logger.error(f"Migration failed: {e}")
         return False
 
-def migrate_supabase_to_sqlite():
+def migrate_neon_to_sqlite():
     """
-    Migrate data from Supabase database to SQLite.
+    Migrate data from Neon PostgreSQL database to SQLite.
     
-    This function reads all data from the Supabase database
+    This function reads all data from the Neon PostgreSQL database
     and writes it to the SQLite database.
     """
     try:
         # Initialize providers
         sqlite_path = DATABASE_URL.replace("sqlite:///", "")
         sqlite_provider = SQLiteProvider(sqlite_path)
-        supabase_provider = SupabaseProvider(SUPABASE_URL, SUPABASE_KEY)
+        neon_provider = NeonProvider(
+            dbname=NEON_DBNAME,
+            user=NEON_USER,
+            password=NEON_PASSWORD,
+            host=NEON_HOST,
+            sslmode=NEON_SSLMODE
+        )
         
-        logger.info(f"Starting migration from Supabase ({SUPABASE_URL}) to SQLite ({sqlite_path})")
+        logger.info(f"Starting migration from Neon PostgreSQL to SQLite ({sqlite_path})")
         
         # Ensure SQLite database is initialized
         sqlite_provider.init_db()
         
-        # Fetch all students to migrate
-        from supabase import create_client
-        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        # Get a connection to Neon PostgreSQL
+        conn = neon_provider._get_connection()
+        cursor = conn.cursor()
         
         # Get list of unique student IDs
-        response = supabase.table('attempts').select('student_id').execute()
-        if hasattr(response, 'error') and response.error:
-            raise Exception(f"Supabase error: {response.error}")
-        
-        student_ids = set(item['student_id'] for item in response.data)
+        cursor.execute("SELECT DISTINCT student_id FROM attempts")
+        student_ids = [row[0] for row in cursor.fetchall()]
         logger.info(f"Found {len(student_ids)} students to migrate")
         
         total_records = 0
@@ -116,7 +125,7 @@ def migrate_supabase_to_sqlite():
         for student_id in student_ids:
             try:
                 # Get attempts for this student
-                attempts = supabase_provider.get_attempts(student_id)
+                attempts = neon_provider.get_attempts(student_id)
                 
                 for attempt_data in attempts:
                     try:
@@ -151,6 +160,9 @@ def migrate_supabase_to_sqlite():
             except Exception as e:
                 logger.error(f"Error processing student {student_id}: {e}")
         
+        cursor.close()
+        conn.close()
+        
         logger.info(f"Migration completed. {total_records} records transferred to SQLite.")
         return True
     except Exception as e:
@@ -167,18 +179,18 @@ if __name__ == "__main__":
     )
     
     if len(sys.argv) < 2:
-        print("Usage: python -m app.db.data_migration [to_supabase|to_sqlite]")
+        print("Usage: python -m app.db.data_migration [to_neon|to_sqlite]")
         sys.exit(1)
         
     direction = sys.argv[1].lower()
     
-    if direction == "to_supabase":
-        success = migrate_sqlite_to_supabase()
+    if direction == "to_neon":
+        success = migrate_sqlite_to_neon()
     elif direction == "to_sqlite":
-        success = migrate_supabase_to_sqlite()
+        success = migrate_neon_to_sqlite()
     else:
         print(f"Unknown direction: {direction}")
-        print("Usage: python -m app.db.data_migration [to_supabase|to_sqlite]")
+        print("Usage: python -m app.db.data_migration [to_neon|to_sqlite]")
         sys.exit(1)
         
     if success:

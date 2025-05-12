@@ -3,7 +3,7 @@ import sys
 from unittest.mock import patch, MagicMock
 from app.db.db_factory import DatabaseFactory
 from app.db.sqlite_provider import SQLiteProvider
-from app.db.supabase_provider import SupabaseProvider
+from app.db.neon_provider import NeonProvider
 
 
 class TestDatabaseFactory:
@@ -49,38 +49,47 @@ class TestDatabaseFactory:
             db_provider_patcher.stop()
             db_url_patcher.stop()
     
-    def test_get_provider_supabase(self):
-        """Test that get_provider returns a SupabaseProvider when configured for Supabase."""
+    def test_get_provider_neon(self):
+        """Test that get_provider returns a NeonProvider when configured for Neon PostgreSQL."""
         # Create a more comprehensive patch setup
-        db_provider_patcher = patch.object(sys.modules['app.config'], 'DATABASE_PROVIDER', 'supabase')
-        supabase_url_patcher = patch.object(sys.modules['app.config'], 'SUPABASE_URL', 'https://test.supabase.co')
-        supabase_key_patcher = patch.object(sys.modules['app.config'], 'SUPABASE_KEY', 'test_key')
+        db_provider_patcher = patch.object(sys.modules['app.config'], 'DATABASE_PROVIDER', 'neon')
+        neon_dbname_patcher = patch.object(sys.modules['app.config'], 'NEON_DBNAME', 'test_db')
+        neon_user_patcher = patch.object(sys.modules['app.config'], 'NEON_USER', 'test_user')
+        neon_password_patcher = patch.object(sys.modules['app.config'], 'NEON_PASSWORD', 'test_password')
+        neon_host_patcher = patch.object(sys.modules['app.config'], 'NEON_HOST', 'test.host.com')
+        neon_sslmode_patcher = patch.object(sys.modules['app.config'], 'NEON_SSLMODE', 'require')
         
         try:
             # Start the patchers
             db_provider_patcher.start()
-            supabase_url_patcher.start()
-            supabase_key_patcher.start()
+            neon_dbname_patcher.start()
+            neon_user_patcher.start()
+            neon_password_patcher.start()
+            neon_host_patcher.start()
+            neon_sslmode_patcher.start()
             
             # Re-import to pick up patched settings
             import importlib
             importlib.reload(sys.modules['app.db.db_factory'])
             from app.db.db_factory import DatabaseFactory as ReloadedFactory
             
-            # Use patch to avoid actually connecting to Supabase
-            with patch('app.db.supabase_provider.create_client', return_value=MagicMock()):
-                with patch('app.db.supabase_provider.SupabaseProvider.init_db', return_value=None):
+            # Use patch to avoid actually connecting to Neon PostgreSQL
+            with patch('app.db.neon_provider.psycopg2.connect', return_value=MagicMock()):
+                with patch('app.db.neon_provider.NeonProvider.init_db', return_value=None):
                     provider = ReloadedFactory.get_provider()
                     
-                    assert isinstance(provider, SupabaseProvider)
+                    assert isinstance(provider, NeonProvider)
                     # Test that it's a singleton
                     assert ReloadedFactory.get_provider() is provider
                 
         finally:
             # Stop the patchers
             db_provider_patcher.stop()
-            supabase_url_patcher.stop()
-            supabase_key_patcher.stop()
+            neon_dbname_patcher.stop()
+            neon_user_patcher.stop()
+            neon_password_patcher.stop()
+            neon_host_patcher.stop()
+            neon_sslmode_patcher.stop()
     
     def test_get_provider_invalid(self):
         """Test that get_provider raises an error for invalid provider types."""

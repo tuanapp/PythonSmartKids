@@ -1,5 +1,5 @@
 """
-A simple script to test the PostgreSQL connection to Supabase.
+A simple script to test the connection to Neon PostgreSQL database.
 """
 import os
 import sys
@@ -8,30 +8,30 @@ import psycopg2
 from dotenv import load_dotenv
 
 def test_postgres_connection():
-    """Test the Supabase PostgreSQL connection using the connection string."""
+    """Test the Neon PostgreSQL connection using the connection parameters."""
     load_dotenv()
     
-    # Get connection string from environment variable
-    postgres_conn_string = os.getenv("POSTGRES_CONNECTION_STRING")
-    supabase_db_password = os.getenv("SUPABASE_DB_PASSWORD")
+    # Get Neon connection details from environment variables or use defaults
+    dbname = os.getenv("NEON_DBNAME", "smartboydb")
+    user = os.getenv("NEON_USER", "tuanapp")
+    password = os.getenv("NEON_PASSWORD", "HdzrNIKh5mM1")
+    host = os.getenv("NEON_HOST", "ep-sparkling-butterfly-33773987-pooler.ap-southeast-1.aws.neon.tech")
+    sslmode = os.getenv("NEON_SSLMODE", "require")
     
-    if not postgres_conn_string:
-        print("Error: POSTGRES_CONNECTION_STRING not found in environment variables.")
-        print("Please ensure it's set in your .env file.")
-        sys.exit(1)
-        
-    # If the connection string contains ${SUPABASE_DB_PASSWORD}, replace it
-    if "${SUPABASE_DB_PASSWORD}" in postgres_conn_string and supabase_db_password:
-        postgres_conn_string = postgres_conn_string.replace("${SUPABASE_DB_PASSWORD}", supabase_db_password)
-    
-    print(f"Attempting to connect to PostgreSQL database...")
-    print(f"Connection string: {postgres_conn_string.replace(supabase_db_password, '******')}")
+    print(f"Attempting to connect to Neon PostgreSQL database...")
+    print(f"Host: {host}, Database: {dbname}, User: {user}")
     
     start_time = time.time()
     
     try:
         # Attempt to connect
-        conn = psycopg2.connect(postgres_conn_string)
+        conn = psycopg2.connect(
+            dbname=dbname,
+            user=user,
+            password=password,
+            host=host,
+            sslmode=sslmode
+        )
         
         # Calculate connection time
         connection_time = time.time() - start_time
@@ -65,7 +65,7 @@ def test_postgres_connection():
             count = cursor.fetchone()[0]
             print(f"Number of records in attempts table: {count}")
         else:
-            print("❌ The 'attempts' table does not exist!")
+            print("❌ The 'attempts' table does not exist! Run setup_neon_schema.py to create it.")
         
         # Close the connection
         cursor.close()
@@ -83,6 +83,6 @@ def test_postgres_connection():
         return False
 
 if __name__ == "__main__":
-    print("Testing Supabase PostgreSQL Connection")
+    print("Testing Neon PostgreSQL Connection")
     print("-" * 40)
     test_postgres_connection()

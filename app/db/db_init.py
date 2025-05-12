@@ -1,67 +1,73 @@
 import os
 import logging
-from app.config import DATABASE_PROVIDER, SUPABASE_URL, SUPABASE_KEY
-from supabase import create_client, Client
+import psycopg2
+from app.config import DATABASE_PROVIDER, NEON_DBNAME, NEON_USER, NEON_PASSWORD, NEON_HOST, NEON_SSLMODE
 
 logger = logging.getLogger(__name__)
 
-def init_supabase():
+def init_neon():
     """
-    Initialize the Supabase database structure.
+    Initialize the Neon PostgreSQL database structure.
     
-    This function can be run once to set up the initial table structure in Supabase.
-    It uses raw SQL through the Supabase client because Supabase doesn't have a direct
-    table creation API for Python.
+    This function can be run once to set up the initial table structure in Neon PostgreSQL.
     """
     try:
-        logger.info(f"Initializing Supabase database at {SUPABASE_URL}")
-        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        logger.info(f"Initializing Neon PostgreSQL database at {NEON_HOST}")
         
-        # Check if we can connect to Supabase
-        try:
-            # Try to run a simple query to verify connection
-            supabase.table("attempts").select("*").limit(1).execute()
-            logger.info("Table 'attempts' already exists in Supabase")
-        except Exception as e:
-            if "relation" in str(e) and "does not exist" in str(e):
-                # Table doesn't exist, create it
-                logger.info("Creating 'attempts' table in Supabase")
-                
-                # Create the attempts table using SQL
-                # Note: Supabase REST API doesn't support table creation,
-                # so we would typically do this in the Supabase dashboard or using migrations
-                logger.warning(
-                    "To create the table in Supabase, run the following SQL in the Supabase SQL Editor:\n"
-                    "CREATE TABLE attempts (\n"
-                    "    id SERIAL PRIMARY KEY,\n"
-                    "    student_id INTEGER NOT NULL,\n"
-                    "    datetime TIMESTAMP NOT NULL,\n"
-                    "    question TEXT NOT NULL,\n"
-                    "    is_answer_correct BOOLEAN NOT NULL,\n"
-                    "    incorrect_answer TEXT,\n"
-                    "    correct_answer TEXT NOT NULL\n"
-                    ");"
-                )
-                
-                # Set up RLS (Row Level Security) policies
-                logger.warning(
-                    "To set up basic RLS policies, run:\n"
-                    "ALTER TABLE attempts ENABLE ROW LEVEL SECURITY;\n"
-                    "CREATE POLICY \"Allow anonymous select\" ON attempts FOR SELECT USING (true);\n"
-                    "CREATE POLICY \"Allow anonymous insert\" ON attempts FOR INSERT USING (true);"
-                )
-            else:
-                logger.error(f"Error connecting to Supabase: {e}")
+        # Connect to Neon PostgreSQL
+        conn = psycopg2.connect(
+            dbname=NEON_DBNAME,
+            user=NEON_USER,
+            password=NEON_PASSWORD,
+            host=NEON_HOST,
+            sslmode=NEON_SSLMODE
+        )
+        conn.autocommit = True
+        cursor = conn.cursor()
         
-        logger.info("Supabase initialization completed")
+        # Check if the attempts table exists
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'attempts'
+            )
+        """)
+        table_exists = cursor.fetchone()[0]
+        
+        if table_exists:
+            logger.info("Table 'attempts' already exists in Neon PostgreSQL")
+            cursor.execute("SELECT COUNT(*) FROM attempts")
+            count = cursor.fetchone()[0]
+            logger.info(f"Current record count: {count}")
+        else:
+            # Create the attempts table
+            logger.info("Creating 'attempts' table in Neon PostgreSQL")
+            cursor.execute("""
+                CREATE TABLE attempts (
+                    id SERIAL PRIMARY KEY,
+                    student_id INTEGER NOT NULL,
+                    datetime TIMESTAMP NOT NULL,
+                    question TEXT NOT NULL,
+                    is_answer_correct BOOLEAN NOT NULL,
+                    incorrect_answer TEXT,
+                    correct_answer TEXT NOT NULL
+                )
+            """)
+            logger.info("Table 'attempts' created successfully")
+        
+        cursor.close()
+        conn.close()
+        
+        logger.info("Neon PostgreSQL initialization completed")
         return True
     except Exception as e:
-        logger.error(f"Failed to initialize Supabase: {e}")
+        logger.error(f"Failed to initialize Neon PostgreSQL: {e}")
         return False
 
 if __name__ == "__main__":
-    # This allows running this file directly to initialize Supabase
-    if DATABASE_PROVIDER.lower() == "supabase":
-        init_supabase()
+    # This allows running this file directly to initialize the database
+    if DATABASE_PROVIDER.lower() == "neon":
+        init_neon()
     else:
-        logger.warning(f"Current database provider is {DATABASE_PROVIDER}, not Supabase. No initialization performed.")
+        logger.warning(f"Current database provider is {DATABASE_PROVIDER}, not Neon. No initialization performed.")
