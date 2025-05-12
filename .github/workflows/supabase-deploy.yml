@@ -53,30 +53,21 @@ jobs:
           # Set the explicit PostgreSQL connection string
           echo "POSTGRES_CONNECTION_STRING=postgresql://postgres:${{ secrets.SUPABASE_DB_PASSWORD }}@db.apifyzsbctxzfwrqkcqb.supabase.co:5432/postgres" >> $GITHUB_ENV
           
-      - name: Mark migrations as applied if schema exists
-        if: success()
+      - name: Mark migrations as applied
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          DATABASE_PROVIDER: supabase
+          POSTGRES_CONNECTION_STRING: ${{ secrets.POSTGRES_CONNECTION_STRING }}
         run: |
-          if [ -d "migrations" ] && [ -f "migrations/alembic.ini" ]; then
-            # Create a stamp in alembic_version table to mark schema as up-to-date
-            # This will only stamp the database if migrations haven't been applied yet
-            alembic -c migrations/alembic.ini stamp head || true
-          fi
-      
-      - name: Run future migrations
-        if: success()
+          alembic -c migrations/alembic.ini stamp head
+          
+      - name: Run database migrations
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          DATABASE_PROVIDER: supabase
+          POSTGRES_CONNECTION_STRING: ${{ secrets.POSTGRES_CONNECTION_STRING }}
         run: |
-          if [ -d "migrations" ] && [ -f "migrations/alembic.ini" ]; then
-            # Only run upgrade for future migrations
-            alembic -c migrations/alembic.ini upgrade head || echo "No new migrations to apply"
-          fi
+          alembic -c migrations/alembic.ini upgrade head
           
       - name: Check for deployment success
         if: ${{ success() }}
@@ -87,4 +78,3 @@ jobs:
         if: ${{ failure() }}
         run: |
           echo "❌ Deployment to Supabase failed!"
-          # You could add notification steps here
