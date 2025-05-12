@@ -6,6 +6,7 @@ import os
 import logging
 from supabase import create_client
 from dotenv import load_dotenv
+import time
 
 # Configure logging
 logging.basicConfig(
@@ -56,33 +57,47 @@ def setup_supabase_schema():
 
 def create_attempts_table(supabase):
     """
-    Create the attempts table in Supabase.
+    Create the attempts table in Supabase using separate REST API calls.
     """
     try:
-        # Execute SQL to create the table and set up RLS
-        sql = """
-        CREATE TABLE attempts (
-            id SERIAL PRIMARY KEY,
-            student_id INTEGER NOT NULL,
-            datetime TIMESTAMP NOT NULL,
-            question TEXT NOT NULL,
-            is_answer_correct BOOLEAN NOT NULL,
-            incorrect_answer TEXT,
-            correct_answer TEXT NOT NULL
-        );
+        # Break down the table creation into separate statements that can be executed via REST API
         
-        -- Set up basic Row Level Security (RLS) policies
-        ALTER TABLE attempts ENABLE ROW LEVEL SECURITY;
-        CREATE POLICY "Allow anonymous select" ON attempts FOR SELECT USING (true);
-        CREATE POLICY "Allow anonymous insert" ON attempts FOR INSERT USING (true);
-        """
+        # 1. Create the table
+        create_table_response = supabase.postgrest.rpc('', {'command': """
+            CREATE TABLE public.attempts (
+                id SERIAL PRIMARY KEY,
+                student_id INTEGER NOT NULL,
+                datetime TIMESTAMP NOT NULL,
+                question TEXT NOT NULL,
+                is_answer_correct BOOLEAN NOT NULL,
+                incorrect_answer TEXT,
+                correct_answer TEXT NOT NULL
+            )
+        """}).execute()
         
-        # Execute SQL query using REST API since PostgreSQL SQL execution is not directly
-        # supported in the Python client
-        response = supabase.rpc('exec_sql', {'sql': sql}).execute()
+        # Wait a moment for the table to be created
+        time.sleep(1)
+        
+        # 2. Enable RLS
+        rls_response = supabase.postgrest.rpc('', {'command': """
+            ALTER TABLE public.attempts ENABLE ROW LEVEL SECURITY
+        """}).execute()
+        
+        # 3. Create SELECT policy
+        select_policy_response = supabase.postgrest.rpc('', {'command': """
+            CREATE POLICY "Allow anonymous select" ON public.attempts 
+            FOR SELECT USING (true)
+        """}).execute()
+        
+        # 4. Create INSERT policy
+        insert_policy_response = supabase.postgrest.rpc('', {'command': """
+            CREATE POLICY "Allow anonymous insert" ON public.attempts 
+            FOR INSERT USING (true)
+        """}).execute()
         
         logger.info("Successfully created attempts table and set up RLS policies!")
         return True
+        
     except Exception as e:
         logger.error(f"Failed to create attempts table: {e}")
         show_manual_instructions()
@@ -102,7 +117,7 @@ def show_manual_instructions():
     print("4. Create a new query and paste the following SQL:")
     print()
     print("```sql")
-    print("CREATE TABLE attempts (")
+    print("CREATE TABLE public.attempts (")
     print("    id SERIAL PRIMARY KEY,")
     print("    student_id INTEGER NOT NULL,")
     print("    datetime TIMESTAMP NOT NULL,")
@@ -113,9 +128,9 @@ def show_manual_instructions():
     print(");")
     print()
     print("-- Set up basic Row Level Security (RLS) policies")
-    print("ALTER TABLE attempts ENABLE ROW LEVEL SECURITY;")
-    print("CREATE POLICY \"Allow anonymous select\" ON attempts FOR SELECT USING (true);")
-    print("CREATE POLICY \"Allow anonymous insert\" ON attempts FOR INSERT USING (true);")
+    print("ALTER TABLE public.attempts ENABLE ROW LEVEL SECURITY;")
+    print("CREATE POLICY \"Allow anonymous select\" ON public.attempts FOR SELECT USING (true);")
+    print("CREATE POLICY \"Allow anonymous insert\" ON public.attempts FOR INSERT USING (true);")
     print("```")
     print()
     print("5. Click 'Run' to execute the SQL")
