@@ -35,9 +35,20 @@ async def generate_questions(student_id: int):
         patterns = db_service.get_question_patterns()
         logger.debug(f"Retrieved {len(patterns)} patterns")        
 
-        questions = generate_practice_questions(attempts, patterns)
+        questions_response = generate_practice_questions(attempts, patterns)
         logger.debug("Generated new questions successfully")
-        return questions
+        
+        # Format the response to match what the client expects
+        # if 'questions' in questions_response and isinstance(questions_response['questions'], list):
+        #     formatted_questions = {}
+        #     for idx, q in enumerate(questions_response['questions']):
+        #         key = f"{q.get('topic', 'Question')}{idx+1}"
+        #         formatted_questions[key] = q['question']
+            
+        #     return {"questions": formatted_questions}
+        # else:
+        #     # If there's an error or no questions, return the response as is
+        return questions_response
     except Exception as e:
         logger.error(f"Error generating questions: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -141,33 +141,32 @@ def generate_practice_questions(attempts, patterns):
         #return generate_fallback_questions()
 
     # Create example JSON separately to avoid f-string issues
-    response_json_format = '''
-{
-  "questions": [
-    {
-      "number": 1,
-      "topic": "algebra",
-      "pattern": "a + _ = b",
-      "question": "500 + _ = 700",
-      "answer": 200
-    },
-    {
-      "number": 2,
-      "topic": "algebra",
-      "pattern": "a - _ = b",
-      "question": "300 - _ = -500",
-      "answer": 800
-    },
-    {
-      "number": 3,
-      "topic": "algebra",
-      "pattern": "a + b = _",
-      "question": "999 + (-999)",
-      "answer": 0
-    }
-  ]
-}
-'''
+        response_json_format = '''
+        {
+        [
+            {
+            "number": [an incremental integer],
+            "topic": [the type of question "algebra"],
+            "pattern": [example question pattern "a + _ = b"],
+            "question": [example question 500 + _ = 700"],
+            "answer": [the answer 200]
+            }
+        ]
+        }
+        '''
+    # response_json_format = '''
+    #     {
+    #     "questions": [
+    #         {
+    #         "number": [an incremental integer],
+    #         "topic": [the type of question "algebra"],
+    #         "pattern": [example question pattern "a + _ = b"],
+    #         "question": [example question 500 + _ = 700"],
+    #         "answer": [the answer 200]
+    #         }
+    #     ]
+    #     }
+    #     '''
 
 
 #     example_json = '''
@@ -204,7 +203,7 @@ Context:
 5. Include at least one question from their strong areas but with increased difficulty
 6. {difficulty}
 
-Return ONLY a JSON object for each question pattern, with the following format: 
+Return ONLY a JSON object for each question pattern, with the following format for each question and answer set: 
 {response_json_format}"""
     }
 
@@ -234,7 +233,8 @@ Return ONLY a JSON object for each question pattern, with the following format:
         
         return {
             'questions': questions,
-            'timestamp': datetime.now()
+            'timestamp': datetime.now(),
+            'message': "Success"
         }
     except json.JSONDecodeError as je:
         logger.error(f"JSON decode error: {str(je)}")
@@ -245,24 +245,63 @@ Return ONLY a JSON object for each question pattern, with the following format:
 
 def generate_fallback_questions(error_message="Unknown error occurred"):
     """Generate basic questions as a fallback if AI fails"""
-    questions = {
-        'Addition': f"{random.randint(10, 99)} + {random.randint(10, 99)}",
-        'Multiplication1': f"{random.randint(2, 12)} × {random.choice([2, 3, 4, 5, 10])}",
-        'Division1': f"{random.randint(20, 100)} ÷ {random.choice([2, 5, 10])}",
-        'SubtractionX': f"__ - {random.randint(10, 50)} = {random.randint(10, 50)}"
-    }
+    fallback_questions = [
+        {
+            "number": 1,
+            "topic": "addition",
+            "pattern": "a + b = _",
+            "question": f"{random.randint(10, 99)} + {random.randint(10, 99)} = _",
+            "answer": None  # Will be calculated below
+        },
+        {
+            "number": 2,
+            "topic": "subtraction",
+            "pattern": "_ - b = c",
+            "question": f"_ - {random.randint(10, 50)} = {random.randint(10, 50)}",
+            "answer": None  # Will be calculated below
+        },
+        {
+            "number": 3,
+            "topic": "multiplication",
+            "pattern": "a × b = _",
+            "question": f"{random.randint(2, 12)} × {random.choice([2, 3, 4, 5, 10])} = _",
+            "answer": None  # Will be calculated below
+        },
+        {
+            "number": 4,
+            "topic": "division",
+            "pattern": "a ÷ b = _",
+            "question": f"{random.randint(20, 100)} ÷ {random.choice([2, 5, 10])} = _",
+            "answer": None  # Will be calculated below
+        }
+    ]
+    
+    # Calculate answers for each question
+    for question in fallback_questions:
+        if "a + b = _" in question["pattern"]:
+            parts = question["question"].split("+")
+            a = int(parts[0].strip())
+            b = int(parts[1].split("=")[0].strip())
+            question["answer"] = a + b
+        elif "_ - b = c" in question["pattern"]:
+            parts = question["question"].split("-")
+            b = int(parts[1].split("=")[0].strip())
+            c = int(parts[1].split("=")[1].strip())
+            question["answer"] = b + c
+        elif "a × b = _" in question["pattern"]:
+            parts = question["question"].split("×")
+            a = int(parts[0].strip())
+            b = int(parts[1].split("=")[0].strip())
+            question["answer"] = a * b
+        elif "a ÷ b = _" in question["pattern"]:
+            parts = question["question"].split("÷")
+            a = int(parts[0].strip())
+            b = int(parts[1].split("=")[0].strip())
+            question["answer"] = a // b
+    
     return {
-        'questions': questions,
-        'timestamp': datetime.now(),
+        'questions': fallback_questions,
+        'timestamp': datetime.now().isoformat(),
         'message': f"AI question generation failed: {error_message}"
     }
-
-
-# 7. If no suitable pattern exists for a question type, use these formats:
-#    - Addition: "23 + 45"
-#    - AdditionX: "__ + 45 = 68" (find the missing first number)
-#    - Subtraction: "89 - 34"
-#    - SubtractionX: "__ - 34 = 55" (find the missing first number)
-#    - Multiplication: "7 × 8"
-#    - Division: "56 ÷ 8"
 
