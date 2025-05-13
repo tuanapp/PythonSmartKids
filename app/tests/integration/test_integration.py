@@ -24,6 +24,7 @@ def test_submit_and_generate(client):
     """
     with patch("app.repositories.db_service.save_attempt") as mock_save_attempt, \
          patch("app.repositories.db_service.get_attempts") as mock_get_attempts, \
+         patch("app.repositories.db_service.get_question_patterns") as mock_get_patterns, \
          patch("app.services.ai_service.generate_practice_questions") as mock_generate_questions:
         
         # First submit an attempt
@@ -48,6 +49,15 @@ def test_submit_and_generate(client):
                 "datetime": "2023-01-01T12:00:00"
             }
         ]
+        mock_patterns = [
+            {
+                "id": "123",
+                "type": "addition",
+                "pattern_text": "a + b = _",
+                "created_at": "2023-01-01T12:00:00"
+            }
+        ]
+        mock_get_patterns.return_value = mock_patterns
         mock_generate_questions.return_value = {
             "questions": {
                 "Addition": "3+3",
@@ -63,6 +73,9 @@ def test_submit_and_generate(client):
         questions = generate_response.json()["questions"]
         assert isinstance(questions, dict)
         assert len(questions) > 0
+        
+        # Verify the mock calls include patterns
+        mock_generate_questions.assert_called_with(mock_get_attempts.return_value, mock_patterns)
 
 @pytest.mark.integration
 def test_full_api_flow(client):
@@ -72,6 +85,7 @@ def test_full_api_flow(client):
     # This would typically use more extensive mocks or actual test databases
     with patch("app.repositories.db_service.save_attempt") as mock_save_attempt, \
          patch("app.repositories.db_service.get_attempts") as mock_get_attempts, \
+         patch("app.repositories.db_service.get_question_patterns") as mock_get_patterns, \
          patch("app.services.ai_service.generate_practice_questions") as mock_generate_questions, \
          patch("app.services.ai_service.get_analysis") as mock_get_analysis:
         
@@ -96,6 +110,17 @@ def test_full_api_flow(client):
                 "datetime": "2023-01-01T12:00:00"
             }
         ]
+        
+        # Mock patterns
+        mock_patterns = [
+            {
+                "id": "123",
+                "type": "addition",
+                "pattern_text": "a + b = _",
+                "created_at": "2023-01-01T12:00:00"
+            }
+        ]
+        mock_get_patterns.return_value = mock_patterns
         
         # Mock analysis generation
         mock_get_analysis.return_value = {
@@ -128,6 +153,9 @@ def test_full_api_flow(client):
         assert "questions" in questions
         # Just check that we have some questions, don't check the exact number
         assert len(questions["questions"]) >= 1
+        
+        # Verify patterns were used
+        mock_generate_questions.assert_called_with(mock_get_attempts.return_value, mock_patterns)
 
 @pytest.mark.integration
 def test_analyze_and_generate_cycle(client):
@@ -139,6 +167,7 @@ def test_analyze_and_generate_cycle(client):
     """
     with patch("app.repositories.db_service.save_attempt") as mock_save_attempt, \
          patch("app.repositories.db_service.get_attempts") as mock_get_attempts, \
+         patch("app.repositories.db_service.get_question_patterns") as mock_get_patterns, \
          patch("app.services.ai_service.get_analysis") as mock_get_analysis, \
          patch("app.services.ai_service.generate_practice_questions") as mock_generate_questions:
         
@@ -156,33 +185,42 @@ def test_analyze_and_generate_cycle(client):
                 "incorrect_answer": incorrect_answer,
                 "datetime": "2023-01-01T12:00:00"
             }
-            client.post("/submit_attempt", json=attempt_data)
+            submit_response = client.post("/submit_attempt", json=attempt_data)
+            assert submit_response.status_code == 200
+            assert question in submit_response.json()["message"]
         
-        # Mock attempts retrieval for both endpoints
+        # Set up data for analysis and generation
         attempts = [
             {
-                "question": "2+2", 
-                "is_correct": True, 
-                "incorrect_answer": "",
-                "correct_answer": "4", 
-                "datetime": "2023-01-01T12:00:00"
-            },
-            {
-                "question": "3+5", 
-                "is_correct": True, 
-                "incorrect_answer": "",
-                "correct_answer": "8",  
-                "datetime": "2023-01-01T12:00:00"
-            },
-            {
-                "question": "7-3", 
-                "is_correct": False, 
-                "incorrect_answer": "5",
-                "correct_answer": "4", 
+                "question": q,
+                "is_correct": c,
+                "incorrect_answer": i,
+                "correct_answer": a,
                 "datetime": "2023-01-01T12:00:00"
             }
+            for q, a, c, i in [
+                ("2+2", "4", True, ""),
+                ("3+5", "8", True, ""),
+                ("7-3", "4", False, "5")
+            ]
         ]
         mock_get_attempts.return_value = attempts
+
+        patterns = [
+            {
+                "id": "123",
+                "type": "addition",
+                "pattern_text": "a + b = _",
+                "created_at": "2023-01-01T12:00:00"
+            },
+            {
+                "id": "124",
+                "type": "subtraction",
+                "pattern_text": "a - b = _",
+                "created_at": "2023-01-01T12:00:00"
+            }
+        ]
+        mock_get_patterns.return_value = patterns
         
         # Mock analysis
         analysis_result = {
@@ -212,10 +250,13 @@ def test_analyze_and_generate_cycle(client):
         generate_response = client.post("/generate-questions/1")
         assert generate_response.status_code == 200
         questions = generate_response.json()["questions"]
+        assert "Subtraction" in questions  # Verify focus on weak area
+        assert "Addition" in questions     # Verify including some strong area questions
         
-        # Check for the presence of subtraction questions, not a specific key
-        has_subtraction_question = any("Subtraction" in key for key in questions.keys())
-        assert has_subtraction_question  # Checking if questions target weaknesses
+        # Verify the flow of data
+        mock_get_attempts.assert_called()
+        mock_get_patterns.assert_called()
+        mock_generate_questions.assert_called_with(attempts, patterns)
 
 @pytest.mark.integration
 def test_question_patterns_endpoint(client):

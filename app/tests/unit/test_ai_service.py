@@ -39,6 +39,22 @@ class TestAIService:
                 "datetime": "2023-01-01T12:00:00"
             }
         ]
+
+        # Mock patterns
+        patterns = [
+            {
+                "id": "123",
+                "type": "addition",
+                "pattern_text": "a + b = _",
+                "created_at": "2023-01-01T12:00:00"
+            },
+            {
+                "id": "124",
+                "type": "subtraction",
+                "pattern_text": "a - b = _",
+                "created_at": "2023-01-01T12:00:00"
+            }
+        ]
         
         # Test with mock OpenAI client
         with patch("app.services.ai_service.client.chat.completions.create") as mock_openai_create:
@@ -52,7 +68,7 @@ class TestAIService:
             mock_openai_create.return_value = mock_response
             
             # Call the function
-            result = generate_practice_questions(attempts)
+            result = generate_practice_questions(attempts, patterns)
             
             # Assertions
             assert isinstance(result, dict)

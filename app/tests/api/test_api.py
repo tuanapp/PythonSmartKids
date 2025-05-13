@@ -44,6 +44,14 @@ def test_generate_questions_unit(mock_generate_practice_questions, mock_db_servi
             "datetime": "2023-01-01T12:00:00"
         }
     ]
+    mock_patterns = [
+        {
+            "id": "123",
+            "type": "addition",
+            "pattern_text": "a + b = _",
+            "created_at": "2023-01-01T12:00:00"
+        }
+    ]
     mock_questions = {
         "questions": {
             "Addition": "4+4",
@@ -54,6 +62,7 @@ def test_generate_questions_unit(mock_generate_practice_questions, mock_db_servi
     
     # Set up mocks
     mock_db_service.get_attempts.return_value = mock_attempts
+    mock_db_service.get_question_patterns.return_value = mock_patterns
     mock_generate_practice_questions.return_value = mock_questions
     
     # Make request
@@ -63,7 +72,7 @@ def test_generate_questions_unit(mock_generate_practice_questions, mock_db_servi
     assert response.status_code == 200
     assert response.json() == mock_questions
     mock_db_service.get_attempts.assert_called_once_with(student_id)
-    mock_generate_practice_questions.assert_called_once_with(mock_attempts)
+    mock_generate_practice_questions.assert_called_once_with(mock_attempts, mock_patterns)
 
 @patch("app.api.routes.db_service")
 @patch("app.api.routes.generate_practice_questions")
@@ -89,6 +98,15 @@ def test_generate_questions_with_empty_attempts(mock_generate_practice_questions
     """
     # Set up mocks
     mock_db_service.get_attempts.return_value = []
+    mock_patterns = [
+        {
+            "id": "123",
+            "type": "addition",
+            "pattern_text": "a + b = _",
+            "created_at": "2023-01-01T12:00:00"
+        }
+    ]
+    mock_db_service.get_question_patterns.return_value = mock_patterns
     mock_questions = {
         "questions": {
             "Addition": "1+1",
@@ -105,7 +123,7 @@ def test_generate_questions_with_empty_attempts(mock_generate_practice_questions
     assert response.status_code == 200
     assert len(response.json()["questions"]) > 0
     mock_db_service.get_attempts.assert_called_once_with(1)
-    mock_generate_practice_questions.assert_called_once_with([])
+    mock_generate_practice_questions.assert_called_once_with([], mock_patterns)
 
 @patch("app.api.routes.db_service")
 def test_submit_attempt_unit(mock_db_service, client):

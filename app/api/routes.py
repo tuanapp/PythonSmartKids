@@ -31,7 +31,11 @@ async def generate_questions(student_id: int):
         # Get student's previous attempts
         attempts = db_service.get_attempts(student_id)
         logger.debug(f"Retrieved {len(attempts)} previous attempts")
-        questions = generate_practice_questions(attempts)
+
+        patterns = db_service.get_question_patterns()
+        logger.debug(f"Retrieved {len(patterns)} patterns")        
+
+        questions = generate_practice_questions(attempts, patterns)
         logger.debug("Generated new questions successfully")
         return questions
     except Exception as e:
