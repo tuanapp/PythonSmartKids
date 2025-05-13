@@ -241,12 +241,12 @@ Return ONLY a JSON object for each question pattern, with the following format:
         }
     except json.JSONDecodeError as je:
         logger.error(f"JSON decode error: {str(je)}")
-        return generate_fallback_questions()
+        return generate_fallback_questions(error_message=str(je))
     except Exception as e:
         logger.error(f"Error generating questions with AI: {str(e)}")
-        return generate_fallback_questions()
+        return generate_fallback_questions(error_message=str(e))
 
-def generate_fallback_questions():
+def generate_fallback_questions(error_message="Unknown error occurred"):
     """Generate basic questions as a fallback if AI fails"""
     questions = {
         'Addition': f"{random.randint(10, 99)} + {random.randint(10, 99)}",
@@ -256,7 +256,8 @@ def generate_fallback_questions():
     }
     return {
         'questions': questions,
-        'timestamp': datetime.now()
+        'timestamp': datetime.now(),
+        'message': f"AI question generation failed: {error_message}"
     }
 
 
