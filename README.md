@@ -317,3 +317,40 @@ hosted @ https://vercel.com/tuans-projects-b937be10/python-smart-kids
 Database 
 hosted @ https://console.neon.tech/app/projects/dark-hill-03559036/branches/br-withered-block-05263935/tables?database=smartboydb
 dev @ C:\Private\GIT\PythonSmartKids
+
+
+
+
+
+
+
+
+
+I've successfully added the RUN_REAL_API_TESTS environment variable to your project. Here's what I did:
+
+Added the variable to your .env file with a default value of False:
+# Testing Configuration
+RUN_REAL_API_TESTS=False
+
+Updated your config.py file to load and properly convert this environment variable to a boolean:
+# Testing settings
+RUN_REAL_API_TESTS = os.getenv("RUN_REAL_API_TESTS", "False").lower() == "true"
+
+Added a new real marker to your pytest.ini file so you can easily run just the real API tests using the command:
+python -m pytest -m real -v
+
+Updated your test_ai_service_real.py file to use the environment variable from the config file rather than directly checking os.environ.
+
+Now when you want to run tests that make actual API calls, you have two options:
+
+Temporary change: Change RUN_REAL_API_TESTS=False to RUN_REAL_API_TESTS=True in your .env file and run:
+python -m pytest -m real -v
+
+Command-line override: Keep the value as False in the .env file and override it at run time:
+# Windows Command Prompt
+set RUN_REAL_API_TESTS=True && python -m pytest -m real -v
+
+# PowerShell
+$env:RUN_REAL_API_TESTS="True"; python -m pytest -m real -v
+
+This approach ensures that your real API tests won't accidentally run and consume your API quota during normal development and CI/CD workflows.

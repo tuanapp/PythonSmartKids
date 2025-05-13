@@ -16,3 +16,6 @@ NEON_SSLMODE = os.getenv("NEON_SSLMODE", "require")
 
 # OpenAI settings
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+
+# Testing settings
+RUN_REAL_API_TESTS = os.getenv("RUN_REAL_API_TESTS", "False").lower() == "true"

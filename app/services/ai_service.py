@@ -256,7 +256,7 @@ def generate_fallback_questions():
     }
     return {
         'questions': questions,
-        'timestamp': None
+        'timestamp': datetime.now()
     }
 
 
