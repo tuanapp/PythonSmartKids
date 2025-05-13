@@ -6,16 +6,16 @@ from datetime import datetime, timedelta
 import logging
 
 logger = logging.getLogger(__name__)
-
+_model = "qwen/qwen3-0.6b-04-28:free"
 client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key="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",
+    base_url="https://openrouter.ai/api/v1/",
+    api_key="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",
 
     #api_key=OPENAI_API_KEY,
-    # default_headers={
-    #     "HTTP-Referer": "https://github.com/tuanna0308/PythonSmartKids",
-    #     "X-Title": "PythonSmartKids"
-    # }
+    default_headers={
+        "HTTP-Referer": "https://github.com/tuanna0308/PythonSmartKids",
+        "X-Title": "PythonSmartKids"
+    }
 )
 
 def get_analysis(student_data):
@@ -36,7 +36,7 @@ def get_analysis(student_data):
     print("Attempts:", messages)
     
     completion = client.chat.completions.create(
-        model="qwen/qwen3-4b:free",
+        model= _model,
         messages=messages
     )
 
@@ -216,7 +216,7 @@ Return ONLY a JSON object for each question pattern, with the following format:
 
     try:
         completion = client.chat.completions.create(
-            model="qwen/qwen3-4b:free",
+            model= _model,
             messages=[prompt]
         )
         
