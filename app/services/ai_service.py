@@ -1,20 +1,17 @@
 import json
 from openai import OpenAI
-from app.config import OPENAI_API_KEY
+from app.config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL, HTTP_REFERER, APP_TITLE
 import random
 from datetime import datetime, timedelta
 import logging
 
 logger = logging.getLogger(__name__)
-_model = "qwen/qwen3-0.6b-04-28:free"
 client = OpenAI(
-    base_url="https://openrouter.ai/api/v1/",
-    api_key="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",
-
-    #api_key=OPENAI_API_KEY,
+    base_url=OPENAI_BASE_URL,
+    api_key=OPENAI_API_KEY,
     default_headers={
-        "HTTP-Referer": "https://github.com/tuanna0308/PythonSmartKids",
-        "X-Title": "PythonSmartKids"
+        "HTTP-Referer": HTTP_REFERER,
+        "X-Title": APP_TITLE
     }
 )
 
@@ -36,7 +33,7 @@ def get_analysis(student_data):
     print("Attempts:", messages)
     
     completion = client.chat.completions.create(
-        model= _model,
+        model=OPENAI_MODEL,
         messages=messages
     )
 
@@ -216,7 +213,7 @@ Return ONLY a JSON object for each question pattern, with the following format:
 
     try:
         completion = client.chat.completions.create(
-            model= _model,
+            model=OPENAI_MODEL,
             messages=[prompt]
         )
         
