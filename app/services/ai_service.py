@@ -302,10 +302,10 @@ def generate_fallback_questions(error_message="Unknown error occurred"):
             question["answer"] = a // b
     
     # Only show last 4 digits of API key for security
-    #api_key_last4 = OPENAI_API_KEY[-4:] if OPENAI_API_KEY else "None"
+    api_key_last3 = OPENAI_API_KEY[-3:] if OPENAI_API_KEY else "None"
     return {
         'questions': fallback_questions,
         'timestamp': datetime.now().isoformat(),
-        'message': f"AI question generation failed: {error_message} {OPENAI_MODEL} {OPENAI_API_KEY} {OPENAI_BASE_URL}"
+        'message': f"AI question generation failed: {error_message} {OPENAI_MODEL} {api_key_last3} {OPENAI_BASE_URL}"
     }
 
