@@ -31,6 +31,8 @@ This project provides an API for tracking kids' math learning progress and using
     uvicorn app.main:app --reload
     ```
 
+    locally it will be accessible via http://127.0.0.1:8000/
+
 4. API Endpoints:
     - `POST /submit_attempt` - Submit a math question attempt.
     - `GET /analyze_student/{student_id}` - Get AI-powered analysis for weak areas.
@@ -125,6 +127,7 @@ This structure ensures that our code is **modular, testable, and easy to scale**
 #### **Step 1: Collecting Student Responses**
 "When a student answers a math question, the response is sent to our API with details such as:  
 - Student ID  
+- Firebase User UID (for user authentication and tracking) 
 - Timestamp  
 - Question  
 - Whether the answer is correct or not  

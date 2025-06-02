@@ -33,7 +33,8 @@ def test_generate_questions_unit(mock_generate_practice_questions, mock_db_servi
             "is_correct": True,
             "incorrect_answer": "",
             "correct_answer": "4",
-            "datetime": "2023-01-01T12:00:00"
+            "datetime": "2023-01-01T12:00:00",
+            "uid": "test-firebase-uid-api-1"
         },
         {
             "question": "3+3", 
@@ -41,7 +42,8 @@ def test_generate_questions_unit(mock_generate_practice_questions, mock_db_servi
             "is_correct": True,
             "incorrect_answer": "",
             "correct_answer": "6",
-            "datetime": "2023-01-01T12:00:00"
+            "datetime": "2023-01-01T12:00:00",
+            "uid": "test-firebase-uid-api-2"
         }
     ]
     mock_patterns = [
@@ -133,6 +135,7 @@ def test_submit_attempt_unit(mock_db_service, client):
     # Test data
     attempt_data = {
         "student_id": 1,
+        "uid": "test-firebase-api-uid",
         "question": "5-3",
         "is_answer_correct": True,
         "incorrect_answer": "",
@@ -163,14 +166,16 @@ def test_analyze_student_unit(mock_ai_service, mock_db_service, client):
             "is_correct": True, 
             "incorrect_answer": "",
             "correct_answer": "4",
-            "datetime": "2023-01-01T12:00:00"
+            "datetime": "2023-01-01T12:00:00",
+            "uid": "test-firebase-uid-api-analyze-1"
         },
         {
             "question": "3-1", 
             "is_correct": True,
             "incorrect_answer": "",
             "correct_answer": "2",
-            "datetime": "2023-01-01T12:00:00"
+            "datetime": "2023-01-01T12:00:00",
+            "uid": "test-firebase-uid-api-analyze-2"
         }
     ]
     mock_analysis = {

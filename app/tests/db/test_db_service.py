@@ -9,7 +9,7 @@ class TestDBService:
     Test suite for database service operations.
     """
     
-    @patch('app.repositories.db_service.db_provider')
+    @patch('app.repositories.db_service.db_provider')    
     def test_get_attempts(self, mock_db_provider):
         """
         Test retrieving attempts for a student from the database
@@ -21,14 +21,16 @@ class TestDBService:
                 "is_correct": True,
                 "incorrect_answer": "5",
                 "correct_answer": "4",
-                "datetime": "2023-01-01T12:00:00"
+                "datetime": "2023-01-01T12:00:00",
+                "uid": "test-firebase-uid-mock-1"
             },
             {
                 "question": "3+3",
                 "is_correct": True,
                 "incorrect_answer": "",
                 "correct_answer": "6",
-                "datetime": "2023-01-01T12:05:00"
+                "datetime": "2023-01-01T12:05:00",
+                "uid": "test-firebase-uid-mock-2"
             }
         ]
         
@@ -72,6 +74,7 @@ class TestDBService:
         # Create a test attempt
         attempt = MathAttempt(
             student_id=1,
+            uid="test-firebase-uid-123",
             question="5+5",
             is_answer_correct=False,
             correct_answer="10",
@@ -81,8 +84,7 @@ class TestDBService:
         
         # Call the function
         save_attempt(attempt)
-        
-        # Assertions
+          # Assertions
         mock_db_provider.save_attempt.assert_called_once_with(attempt)
         
     @patch('app.repositories.db_service.db_provider')
@@ -96,6 +98,7 @@ class TestDBService:
         # Create a test attempt
         attempt = MathAttempt(
             student_id=1,
+            uid="test-firebase-uid-123",
             question="5+5",
             is_answer_correct=False,
             correct_answer="10",

@@ -50,12 +50,12 @@ class NeonProvider(DatabaseProvider):
             cursor = conn.cursor()
             
             logger.info(f"Connected to Neon PostgreSQL at {self.host}")
-            
-            # Create attempts table if it doesn't exist
+              # Create attempts table if it doesn't exist
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS attempts (
                     id SERIAL PRIMARY KEY,
                     student_id INTEGER NOT NULL,
+                    uid TEXT NOT NULL,
                     datetime TIMESTAMP NOT NULL,
                     question TEXT NOT NULL,
                     is_answer_correct BOOLEAN NOT NULL,
@@ -72,7 +72,7 @@ class NeonProvider(DatabaseProvider):
         except Exception as e:
             logger.error(f"Failed to initialize Neon database: {e}")
             raise Exception(f"Database initialization error: {e}")
-    
+        
     def save_attempt(self, attempt: MathAttempt) -> None:
         """Save a math attempt to the Neon database."""
         try:
@@ -82,10 +82,11 @@ class NeonProvider(DatabaseProvider):
             # Insert the attempt
             cursor.execute("""
                 INSERT INTO attempts 
-                (student_id, datetime, question, is_answer_correct, incorrect_answer, correct_answer)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                (student_id, uid, datetime, question, is_answer_correct, incorrect_answer, correct_answer)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
             """, (
                 attempt.student_id,
+                attempt.uid,
                 attempt.datetime,
                 attempt.question,
                 attempt.is_answer_correct,
@@ -107,10 +108,9 @@ class NeonProvider(DatabaseProvider):
         try:
             conn = self._get_connection()
             cursor = conn.cursor(cursor_factory=RealDictCursor)
-            
-            # Query for attempts by student_id
+              # Query for attempts by student_id
             cursor.execute("""
-                SELECT question, is_answer_correct, incorrect_answer, correct_answer, datetime
+                SELECT question, is_answer_correct, incorrect_answer, correct_answer, datetime, uid
                 FROM attempts
                 WHERE student_id = %s
                 ORDER BY datetime DESC
@@ -120,14 +120,14 @@ class NeonProvider(DatabaseProvider):
             data = cursor.fetchall()
             cursor.close()
             conn.close()
-            
-            # Format the data to match the expected schema
+              # Format the data to match the expected schema
             attempts = [{
                 "question": item['question'],
                 "is_correct": bool(item['is_answer_correct']),
                 "incorrect_answer": item['incorrect_answer'] if item['incorrect_answer'] else "",
                 "correct_answer": str(item['correct_answer']) if item['correct_answer'] else "",
-                "datetime": item['datetime'].isoformat() if isinstance(item['datetime'], datetime) else item['datetime']
+                "datetime": item['datetime'].isoformat() if isinstance(item['datetime'], datetime) else item['datetime'],
+                "uid": item['uid']
             } for item in data]
             
             logger.debug(f"Retrieved {len(attempts)} attempts for student {student_id}")

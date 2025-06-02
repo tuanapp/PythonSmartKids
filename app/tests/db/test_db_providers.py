@@ -51,12 +51,12 @@ class TestNeonProvider:
         mock_conn = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
         mock_connect.return_value = mock_conn
-        
-        # Create provider and test attempt
+          # Create provider and test attempt
         provider = self._create_provider()
         test_datetime = datetime(2023, 1, 1, 12, 0, 0)
         attempt = MathAttempt(
             student_id=1,
+            uid="test-firebase-uid-provider",
             question="1+1",
             is_answer_correct=True,
             correct_answer="2",

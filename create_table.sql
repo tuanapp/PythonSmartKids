@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS public.attempts (
     id SERIAL PRIMARY KEY,
     student_id INTEGER NOT NULL,
+    uid TEXT NOT NULL,
     datetime TIMESTAMP NOT NULL,
     question TEXT NOT NULL,
     is_answer_correct BOOLEAN NOT NULL,

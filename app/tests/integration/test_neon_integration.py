@@ -58,10 +58,10 @@ def neon_connection():
 @pytest.mark.integration
 @pytest.mark.neon
 def test_insert_attempt_to_neon(neon_provider, unique_student_id):
-    """Test directly inserting a record into the Neon PostgreSQL attempts table."""
-    # Create a test attempt with a timestamp that will be easily identifiable
+    """Test directly inserting a record into the Neon PostgreSQL attempts table."""    # Create a test attempt with a timestamp that will be easily identifiable
     test_attempt = MathAttempt(
         student_id=unique_student_id,
+        uid="test-firebase-uid-integration",
         question="5+7",
         is_answer_correct=True,
         incorrect_answer=None,
@@ -94,6 +94,7 @@ def test_read_attempt_from_neon(neon_provider, unique_student_id):
     ]):
         attempt = MathAttempt(
             student_id=unique_student_id,
+            uid=f"test-firebase-uid-{i}",
             question=question,
             is_answer_correct=is_correct,
             incorrect_answer="5" if not is_correct else None,
@@ -156,10 +157,10 @@ def test_insert_fixed_record(neon_provider):
     cursor.execute("DELETE FROM attempts WHERE student_id = %s", (FIXED_STUDENT_ID,))
     cursor.close()
     conn.close()
-    
-    # Create a test attempt with the fixed student ID
+      # Create a test attempt with the fixed student ID
     test_attempt = MathAttempt(
         student_id=FIXED_STUDENT_ID,
+        uid="test-firebase-uid-fixed",
         question="10+15",
         is_answer_correct=True,
         incorrect_answer=None,

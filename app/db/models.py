@@ -14,6 +14,7 @@ class Attempt(Base):
     
     id = Column(Integer, primary_key=True)
     student_id = Column(Integer, nullable=False)
+    uid = Column(String, nullable=False)  # From Firebase Users table (User UID)
     datetime = Column(DateTime, nullable=False)
     question = Column(Text, nullable=False)
     is_answer_correct = Column(Boolean, nullable=False)

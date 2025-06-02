@@ -91,12 +91,12 @@ def create_attempts_table(cursor):
     """
     Create the attempts table in Neon PostgreSQL.
     """
-    try:
-        # Create the table
+    try:        # Create the table
         cursor.execute("""
             CREATE TABLE public.attempts (
                 id SERIAL PRIMARY KEY,
                 student_id INTEGER NOT NULL,
+                uid TEXT NOT NULL,
                 datetime TIMESTAMP NOT NULL,
                 question TEXT NOT NULL,
                 is_answer_correct BOOLEAN NOT NULL,
@@ -151,6 +151,7 @@ def show_manual_instructions():
     print("CREATE TABLE public.attempts (")
     print("    id SERIAL PRIMARY KEY,")
     print("    student_id INTEGER NOT NULL,")
+    print("    uid TEXT NOT NULL,")
     print("    datetime TIMESTAMP NOT NULL,")
     print("    question TEXT NOT NULL,")
     print("    is_answer_correct BOOLEAN NOT NULL,")

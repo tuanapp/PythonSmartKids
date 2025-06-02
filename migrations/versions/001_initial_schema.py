@@ -20,6 +20,7 @@ def upgrade() -> None:
     op.create_table('attempts',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('student_id', sa.Integer(), nullable=False),
+        sa.Column('uid', sa.String(), nullable=False),
         sa.Column('datetime', sa.DateTime(), nullable=False),
         sa.Column('question', sa.Text(), nullable=False),
         sa.Column('is_answer_correct', sa.Boolean(), nullable=False),

@@ -26,10 +26,10 @@ def test_submit_and_generate(client):
          patch("app.repositories.db_service.get_attempts") as mock_get_attempts, \
          patch("app.repositories.db_service.get_question_patterns") as mock_get_patterns, \
          patch("app.services.ai_service.generate_practice_questions") as mock_generate_questions:
-        
-        # First submit an attempt
+          # First submit an attempt
         attempt_data = {
             "student_id": 1,
+            "uid": "test-firebase-integration-uid",
             "question": "2+2",
             "is_answer_correct": True,
             "incorrect_answer": "",
@@ -88,10 +88,10 @@ def test_full_api_flow(client):
          patch("app.repositories.db_service.get_question_patterns") as mock_get_patterns, \
          patch("app.services.ai_service.generate_practice_questions") as mock_generate_questions, \
          patch("app.services.ai_service.get_analysis") as mock_get_analysis:
-        
-        # Submit an attempt
+          # Submit an attempt
         attempt_data = {
             "student_id": 1,
+            "uid": "test-firebase-uid-integration-2",
             "question": "2+2",
             "is_answer_correct": True,
             "incorrect_answer": "",
@@ -99,15 +99,15 @@ def test_full_api_flow(client):
             "datetime": "2023-01-01T12:00:00"
         }
         client.post("/submit_attempt", json=attempt_data)
-        
-        # Mock attempt retrieval
+          # Mock attempt retrieval
         mock_get_attempts.return_value = [
             {
                 "question": "2+2",
                 "is_correct": True,
                 "incorrect_answer": "",
                 "correct_answer": "4", 
-                "datetime": "2023-01-01T12:00:00"
+                "datetime": "2023-01-01T12:00:00",
+                "uid": "test-firebase-uid-mock-integration"
             }
         ]
         
@@ -173,12 +173,12 @@ def test_analyze_and_generate_cycle(client):
         
         # Submit multiple attempts
         for question, correct_answer, is_answer_correct, incorrect_answer in [
-            ("2+2", "4", True, ""),
-            ("3+5", "8", True, ""),
+            ("2+2", "4", True, ""),            ("3+5", "8", True, ""),
             ("7-3", "4", False, "5")
         ]:
             attempt_data = {
                 "student_id": 1,
+                "uid": f"test-firebase-uid-integration-loop-{question}",
                 "question": question,
                 "is_answer_correct": is_answer_correct,
                 "correct_answer": correct_answer,
@@ -196,7 +196,8 @@ def test_analyze_and_generate_cycle(client):
                 "is_correct": c,
                 "incorrect_answer": i,
                 "correct_answer": a,
-                "datetime": "2023-01-01T12:00:00"
+                "datetime": "2023-01-01T12:00:00",
+                "uid": f"test-firebase-uid-analysis-{q.replace('+', 'plus').replace('-', 'minus')}"
             }
             for q, a, c, i in [
                 ("2+2", "4", True, ""),
