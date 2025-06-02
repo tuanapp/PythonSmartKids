@@ -242,6 +242,7 @@ Return ONLY a JSON object for each question pattern, with the following format f
         return generate_fallback_questions(error_message=str(je))
     except Exception as e:
         logger.error(f"Error generating questions with AI: {str(e)}")
+        logger.error(f"ai client info : {OPENAI_MODEL } {OPENAI_API_KEY} {OPENAI_BASE_URL}")
         return generate_fallback_questions(error_message=str(e))
 
 def generate_fallback_questions(error_message="Unknown error occurred"):
