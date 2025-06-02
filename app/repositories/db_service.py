@@ -32,6 +32,17 @@ def get_attempts(student_id: int):
         logger.error(f"Error retrieving attempts: {e}")
         raise
 
+def get_attempts_by_uid(uid: str):
+    """Get attempts for a user by UID using the configured database provider."""
+    try:
+        attempts = db_provider.get_attempts_by_uid(uid)
+        logger.debug(f"Retrieved {len(attempts)} attempts for user with UID {uid}")
+        logger.debug(f"Sample attempt data: {attempts[0] if attempts else 'No attempts'}")
+        return attempts
+    except Exception as e:
+        logger.error(f"Error retrieving attempts by UID: {e}")
+        raise
+
 def get_question_patterns():
     """Retrieve all question patterns using the configured database provider."""
     try:

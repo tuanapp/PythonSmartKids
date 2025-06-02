@@ -137,6 +137,43 @@ class NeonProvider(DatabaseProvider):
             logger.error(f"Error retrieving attempts from Neon: {e}")
             raise Exception(f"Database error: {e}")
 
+    def get_attempts_by_uid(self, uid: str) -> List[Dict[str, Any]]:
+        """Retrieve attempts for a specific user by UID from the Neon database."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            # Query for attempts by uid
+            cursor.execute("""
+                SELECT question, is_answer_correct, incorrect_answer, correct_answer, datetime, uid, student_id
+                FROM attempts
+                WHERE uid = %s
+                ORDER BY datetime DESC
+                LIMIT 50
+            """, (uid,))
+            
+            data = cursor.fetchall()
+            cursor.close()
+            conn.close()
+            
+            # Format the data to match the expected schema
+            attempts = [{
+                "question": item['question'],
+                "is_correct": bool(item['is_answer_correct']),
+                "incorrect_answer": item['incorrect_answer'] if item['incorrect_answer'] else "",
+                "correct_answer": str(item['correct_answer']) if item['correct_answer'] else "",
+                "datetime": item['datetime'].isoformat() if isinstance(item['datetime'], datetime) else item['datetime'],
+                "uid": item['uid'],
+                "student_id": item['student_id']
+            } for item in data]
+            
+            logger.debug(f"Retrieved {len(attempts)} attempts for user with UID {uid}")
+            return attempts
+            
+        except Exception as e:
+            logger.error(f"Error retrieving attempts by UID from Neon: {e}")
+            raise Exception(f"Database error: {e}")
+
     def get_question_patterns(self):
         """Retrieve all question patterns from the database."""
         try:

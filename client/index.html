@@ -104,11 +104,16 @@
                 studentId = Math.floor(Math.random() * 1000000) + 1; // Generate random student ID
                 localStorage.setItem('studentId', studentId);
             }
+            
+            // Get or create user UID from localStorage (in production this would come from Firebase auth)
+            let userUID = localStorage.getItem('userUID');
+            if (!userUID) {
+                userUID = "user-" + Math.floor(Math.random() * 1000000); // Generate a mock UID for testing
+                localStorage.setItem('userUID', userUID);
+            }
 
-            //temp
-            studentId = 613813;
-
-            let url = `${API_BASE_URL}/generate-questions/${studentId}`;
+            // Use UID instead of student_id for API calls
+            let url = `${API_BASE_URL}/generate-questions/${userUID}`;
             console.log(`Making request to: ${url}`);
 
             fetch(url, {
@@ -132,16 +137,24 @@
 
             settingsForm.classList.add('hidden');
             contentBelowReset.classList.remove('hidden');
-        });
-
-        function displayQuestions(questions) {
+        });        function displayQuestions(questions) {
             var questionsContainer = document.getElementById("questions-container");
             questionsContainer.innerHTML = "";
             questionNum = 1; // Reset question number
 
-            for (const [questionType, question] of Object.entries(questions)) {
-                var qElm = createQuestionElement(questionType, question);
-                questionsContainer.appendChild(qElm);
+            // Check if questions is an array (new format) or an object (old format)
+            if (Array.isArray(questions)) {
+                // New format: array of question objects
+                for (const questionObj of questions) {
+                    var qElm = createQuestionElement(questionObj.topic, questionObj.question);
+                    questionsContainer.appendChild(qElm);
+                }
+            } else {
+                // Old format: object with question types as keys and question text as values
+                for (const [questionType, question] of Object.entries(questions)) {
+                    var qElm = createQuestionElement(questionType, question);
+                    questionsContainer.appendChild(qElm);
+                }
             }
         }
 
@@ -184,6 +197,7 @@
             debugger
             var answerInputs = document.getElementsByClassName("answer-input");
             let studentId = localStorage.getItem('studentId');
+            let userUID = localStorage.getItem('userUID');
 
             for (var i = 0; i < answerInputs.length; i++) {
                 var answerInput = answerInputs[i];
@@ -198,9 +212,10 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                    },                    body: JSON.stringify({
+                    },                    
+                    body: JSON.stringify({
                         student_id: parseInt(studentId),
-                        uid: localStorage.getItem('userUID') || "anonymous", // Get Firebase UID from local storage
+                        uid: userUID || "anonymous",
                         datetime: new Date().toISOString(),
                         question: question,
                         is_answer_correct: userAnswer === correctAnswer,
@@ -289,7 +304,7 @@
             localStorage.clear();
             //location.reload();
             contentBelowReset.classList.add('hidden');
-settingsButton.click();
+            settingsButton.click();
         }
 
         function fetchQuestion(key, val) {

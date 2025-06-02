@@ -21,6 +21,11 @@ class DatabaseProvider(ABC):
         pass
 
     @abstractmethod
+    def get_attempts_by_uid(self, uid: str) -> List[Dict[str, Any]]:
+        """Retrieve attempts for a specific user by UID."""
+        pass
+
+    @abstractmethod
     def get_question_patterns(self) -> List[Dict[str, Any]]:
         """Retrieve all question patterns."""
         pass

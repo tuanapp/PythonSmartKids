@@ -23,6 +23,7 @@ NEON_SSLMODE = os.getenv("NEON_SSLMODE", "require")
 
 # Define a fixed student ID for testing insert and delete operations
 FIXED_STUDENT_ID = 9999999
+FIXED_UID = "test-fixed-firebase-uid"
 
 @pytest.fixture
 def neon_provider():
@@ -40,6 +41,11 @@ def neon_provider():
 def unique_student_id():
     """Generate a unique student ID for test isolation."""
     return int(uuid.uuid4().int % 100000000)  # Ensure it's a reasonable-sized integer
+
+@pytest.fixture
+def unique_uid():
+    """Generate a unique UID for test isolation."""
+    return f"test-uid-{uuid.uuid4()}"
 
 @pytest.fixture
 def neon_connection():
@@ -181,6 +187,50 @@ def test_insert_fixed_record(neon_provider):
     assert latest_attempt["is_correct"] is True
     assert latest_attempt["correct_answer"] == "25"
     print(f"Successfully inserted record with fixed student ID: {FIXED_STUDENT_ID}")
+
+@pytest.mark.integration
+@pytest.mark.neon
+def test_get_attempts_by_uid(neon_provider, unique_uid):
+    """Test retrieving records by UID from the Neon PostgreSQL attempts table."""
+    # Create a test attempt with a unique UID
+    unique_student_id = int(uuid.uuid4().int % 100000000)
+    
+    # Create a few test attempts with the same UID but different data
+    for i, (question, answer, is_correct) in enumerate([
+        ("2+2", "4", True),
+        ("3+5", "8", True),
+        ("7-3", "4", False)
+    ]):
+        attempt = MathAttempt(
+            student_id=unique_student_id + i,  # Different student IDs
+            uid=unique_uid,  # Same UID for all attempts
+            question=question,
+            is_answer_correct=is_correct,
+            incorrect_answer="5" if not is_correct else None,
+            correct_answer=answer,
+            datetime=datetime.datetime.now() + datetime.timedelta(minutes=i)
+        )
+        neon_provider.save_attempt(attempt)
+    
+    # Retrieve attempts by UID
+    attempts = neon_provider.get_attempts_by_uid(unique_uid)
+    
+    # Verify the number of attempts retrieved
+    assert len(attempts) >= 3, "Not all test attempts were retrieved by UID"
+    
+    # Due to ordering by datetime desc, the attempts should be in reverse order
+    assert attempts[0]["question"] == "7-3"
+    assert attempts[0]["is_correct"] is False
+    assert attempts[0]["uid"] == unique_uid
+    
+    # Check a specific field in the second attempt
+    assert attempts[1]["question"] == "3+5"
+    assert attempts[1]["correct_answer"] == "8"
+    assert attempts[1]["uid"] == unique_uid
+    
+    # Additional check for the first attempt
+    assert attempts[2]["question"] == "2+2"
+    assert attempts[2]["uid"] == unique_uid
 
 @pytest.mark.integration
 @pytest.mark.neon

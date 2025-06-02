@@ -141,19 +141,19 @@ def generate_practice_questions(attempts, patterns):
         #return generate_fallback_questions()
 
     # Create example JSON separately to avoid f-string issues
-        response_json_format = '''
+    response_json_format = '''
+    {
+    [
         {
-        [
-            {
-            "number": [an incremental integer],
-            "topic": [the type of question "algebra"],
-            "pattern": [example question pattern "a + _ = b"],
-            "question": [example question 500 + _ = 700"],
-            "answer": [the answer 200]
-            }
-        ]
+        "number": [an incremental integer],
+        "topic": [the type of question "algebra"],
+        "pattern": [example question pattern "a + _ = b"],
+        "question": [example question 500 + _ = 700"],
+        "answer": [the answer 200]
         }
-        '''
+    ]
+    }
+    '''
     # response_json_format = '''
     #     {
     #     "questions": [
@@ -211,6 +211,7 @@ Return ONLY a JSON object for each question pattern, with the following format f
     logger.debug(f"Prompt context - Weak areas: {len(weak_areas)}, Strong areas: {len(strong_areas)}, Patterns: {len(patterns)}")
 
     try:
+        logger.debug(client)
         completion = client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[prompt]

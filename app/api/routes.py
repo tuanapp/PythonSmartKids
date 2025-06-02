@@ -15,21 +15,21 @@ async def submit_attempt(attempt: MathAttempt):
     db_service.save_attempt(attempt)
     return {"message": attempt.question + " Attempt saved successfully - xx " +  datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
-@router.get("/analyze_student/{student_id}")
-async def analyze_student(student_id: int):
-    data = db_service.get_attempts(student_id)
+@router.get("/analyze_student/{uid}")
+async def analyze_student(uid: str):
+    data = db_service.get_attempts_by_uid(uid)
     analysis = ai_service.get_analysis(data)
     return analysis
 
-@router.post("/generate-questions/{student_id}")
-async def generate_questions(student_id: int):
+@router.post("/generate-questions/{uid}")
+async def generate_questions(uid: str):
     """
     Generate a new set of practice questions based on the student's previous performance.
     """
-    logger.debug(f"Received generate-questions request for student_id: {student_id}")
+    logger.debug(f"Received generate-questions request for uid: {uid}")
     try:
         # Get student's previous attempts
-        attempts = db_service.get_attempts(student_id)
+        attempts = db_service.get_attempts_by_uid(uid)
         logger.debug(f"Retrieved {len(attempts)} previous attempts")
 
         patterns = db_service.get_question_patterns()

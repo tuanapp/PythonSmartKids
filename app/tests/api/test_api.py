@@ -25,7 +25,7 @@ def test_generate_questions_unit(mock_generate_practice_questions, mock_db_servi
     This test mocks all external dependencies.
     """
     # Mock data
-    student_id = 1
+    uid = "test-firebase-uid-api-1"
     mock_attempts = [
         {
             "question": "2+2", 
@@ -63,17 +63,17 @@ def test_generate_questions_unit(mock_generate_practice_questions, mock_db_servi
     }
     
     # Set up mocks
-    mock_db_service.get_attempts.return_value = mock_attempts
+    mock_db_service.get_attempts_by_uid.return_value = mock_attempts
     mock_db_service.get_question_patterns.return_value = mock_patterns
     mock_generate_practice_questions.return_value = mock_questions
     
     # Make request
-    response = client.post(f"/generate-questions/{student_id}")
+    response = client.post(f"/generate-questions/{uid}")
     
     # Assertions
     assert response.status_code == 200
     assert response.json() == mock_questions
-    mock_db_service.get_attempts.assert_called_once_with(student_id)
+    mock_db_service.get_attempts_by_uid.assert_called_once_with(uid)
     mock_generate_practice_questions.assert_called_once_with(mock_attempts, mock_patterns)
 
 @patch("app.api.routes.db_service")
@@ -83,10 +83,10 @@ def test_generate_questions_handles_exceptions(mock_generate_practice_questions,
     Test that the endpoint properly handles exceptions.
     """
     # Mock the db_service to raise an exception
-    mock_db_service.get_attempts.side_effect = Exception("Database error")
+    mock_db_service.get_attempts_by_uid.side_effect = Exception("Database error")
     
     # Make request
-    response = client.post("/generate-questions/1")
+    response = client.post("/generate-questions/test-firebase-uid")
     
     # Assertions
     assert response.status_code == 500
@@ -99,7 +99,7 @@ def test_generate_questions_with_empty_attempts(mock_generate_practice_questions
     Test the endpoint when no previous attempts exist.
     """
     # Set up mocks
-    mock_db_service.get_attempts.return_value = []
+    mock_db_service.get_attempts_by_uid.return_value = []
     mock_patterns = [
         {
             "id": "123",
@@ -119,12 +119,13 @@ def test_generate_questions_with_empty_attempts(mock_generate_practice_questions
     mock_generate_practice_questions.return_value = mock_questions
     
     # Make request
-    response = client.post("/generate-questions/1")
+    test_uid = "test-empty-attempts"
+    response = client.post(f"/generate-questions/{test_uid}")
     
     # Assertions
     assert response.status_code == 200
     assert len(response.json()["questions"]) > 0
-    mock_db_service.get_attempts.assert_called_once_with(1)
+    mock_db_service.get_attempts_by_uid.assert_called_once_with(test_uid)
     mock_generate_practice_questions.assert_called_once_with([], mock_patterns)
 
 @patch("app.api.routes.db_service")
@@ -159,7 +160,7 @@ def test_analyze_student_unit(mock_ai_service, mock_db_service, client):
     Unit test for analyze_student endpoint.
     """
     # Mock data
-    student_id = 1
+    uid = "test-firebase-uid-api-analyze-1"
     mock_attempts = [
         {
             "question": "2+2", 
@@ -167,7 +168,7 @@ def test_analyze_student_unit(mock_ai_service, mock_db_service, client):
             "incorrect_answer": "",
             "correct_answer": "4",
             "datetime": "2023-01-01T12:00:00",
-            "uid": "test-firebase-uid-api-analyze-1"
+            "uid": uid
         },
         {
             "question": "3-1", 
@@ -185,16 +186,16 @@ def test_analyze_student_unit(mock_ai_service, mock_db_service, client):
     }
     
     # Set up mocks
-    mock_db_service.get_attempts.return_value = mock_attempts
+    mock_db_service.get_attempts_by_uid.return_value = mock_attempts
     mock_ai_service.get_analysis.return_value = mock_analysis
     
     # Make request
-    response = client.get(f"/analyze_student/{student_id}")
+    response = client.get(f"/analyze_student/{uid}")
     
     # Assertions
     assert response.status_code == 200
     assert response.json() == mock_analysis
-    mock_db_service.get_attempts.assert_called_once_with(student_id)
+    mock_db_service.get_attempts_by_uid.assert_called_once_with(uid)
     mock_ai_service.get_analysis.assert_called_once_with(mock_attempts)
 
 @patch("app.api.routes.db_service")
@@ -204,11 +205,12 @@ def test_analyze_student_handles_exceptions(mock_ai_service, mock_db_service, cl
     Test that the analyze_student endpoint properly handles exceptions.
     """
     # Mock the db_service to raise an exception
-    mock_db_service.get_attempts.side_effect = Exception("Database connection error")
+    mock_db_service.get_attempts_by_uid.side_effect = Exception("Database connection error")
     
     try:
         # Make request
-        response = client.get("/analyze_student/1")
+        test_uid = "test-error-uid"
+        response = client.get(f"/analyze_student/{test_uid}")
         # Assertions - this should not execute if an exception is raised
         assert response.status_code == 500
         assert "Database connection error" in response.json()["detail"]
@@ -217,7 +219,7 @@ def test_analyze_student_handles_exceptions(mock_ai_service, mock_db_service, cl
         pass
     
     # Make sure the mock was called
-    mock_db_service.get_attempts.assert_called_once_with(1)
+    mock_db_service.get_attempts_by_uid.assert_called_once_with(test_uid)
 
 @patch("app.api.routes.db_service")
 def test_get_question_patterns_unit(mock_db_service, client):

@@ -15,9 +15,10 @@ NEON_HOST = os.getenv("NEON_HOST", "ep-sparkling-butterfly-33773987-pooler.ap-so
 NEON_SSLMODE = os.getenv("NEON_SSLMODE", "require")
 
 # OpenAI settings
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1/")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "qwen/qwen3-0.6b-04-28:free")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "")
+
 HTTP_REFERER = os.getenv("HTTP_REFERER", "https://github.com/tuanna0308/PythonSmartKids")
 APP_TITLE = os.getenv("APP_TITLE", "PythonSmartKids")
 
