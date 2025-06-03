@@ -2,7 +2,6 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
-import json
 from app.api.routes import router
 from app.models.schemas import MathAttempt
 import datetime
@@ -68,13 +67,19 @@ def test_generate_questions_unit(mock_generate_practice_questions, mock_db_servi
     mock_generate_practice_questions.return_value = mock_questions
     
     # Make request
-    response = client.post(f"/generate-questions/{uid}")
+    request_data = {
+        "uid": uid,
+        "openai_base_url": None,
+        "openai_api_key": None,
+        "openai_model": None
+    }
+    response = client.post("/generate-questions", json=request_data)
     
     # Assertions
     assert response.status_code == 200
     assert response.json() == mock_questions
     mock_db_service.get_attempts_by_uid.assert_called_once_with(uid)
-    mock_generate_practice_questions.assert_called_once_with(mock_attempts, mock_patterns)
+    mock_generate_practice_questions.assert_called_once_with(mock_attempts, mock_patterns, None, None, None)
 
 @patch("app.api.routes.db_service")
 @patch("app.api.routes.generate_practice_questions")
@@ -86,7 +91,13 @@ def test_generate_questions_handles_exceptions(mock_generate_practice_questions,
     mock_db_service.get_attempts_by_uid.side_effect = Exception("Database error")
     
     # Make request
-    response = client.post("/generate-questions/test-firebase-uid")
+    request_data = {
+        "uid": "test-firebase-uid",
+        "openai_base_url": None,
+        "openai_api_key": None,
+        "openai_model": None
+    }
+    response = client.post("/generate-questions", json=request_data)
     
     # Assertions
     assert response.status_code == 500
@@ -120,13 +131,19 @@ def test_generate_questions_with_empty_attempts(mock_generate_practice_questions
     
     # Make request
     test_uid = "test-empty-attempts"
-    response = client.post(f"/generate-questions/{test_uid}")
+    request_data = {
+        "uid": test_uid,
+        "openai_base_url": None,
+        "openai_api_key": None,
+        "openai_model": None
+    }
+    response = client.post("/generate-questions", json=request_data)
     
     # Assertions
     assert response.status_code == 200
     assert len(response.json()["questions"]) > 0
     mock_db_service.get_attempts_by_uid.assert_called_once_with(test_uid)
-    mock_generate_practice_questions.assert_called_once_with([], mock_patterns)
+    mock_generate_practice_questions.assert_called_once_with([], mock_patterns, None, None, None)
 
 @patch("app.api.routes.db_service")
 def test_submit_attempt_unit(mock_db_service, client):

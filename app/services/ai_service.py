@@ -1,10 +1,11 @@
 import json
 from openai import OpenAI
-from app.config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL, HTTP_REFERER, APP_TITLE
+from app.config import OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_MODEL, HTTP_REFERER, APP_TITLE
 import random
 from datetime import datetime, timedelta
 import logging
 
+#current_response_text = ""
 logger = logging.getLogger(__name__)
 client = OpenAI(
     base_url=OPENAI_BASE_URL,
@@ -101,7 +102,7 @@ def analyze_attempts(attempts):
     
     return weak_areas, number_ranges
 
-def generate_practice_questions(attempts, patterns):
+def generate_practice_questions(attempts, patterns, openai_base_url=None, openai_api_key=None, openai_model=None):
     """
     Generate questions using AI, focusing on student's weak areas based on their attempt history.
     """
@@ -142,17 +143,17 @@ def generate_practice_questions(attempts, patterns):
 
     # Create example JSON separately to avoid f-string issues
     response_json_format = '''
-    {
-    [
-        {
-        "number": [an incremental integer],
-        "topic": [the type of question "algebra"],
-        "pattern": [example question pattern "a + _ = b"],
-        "question": [example question 500 + _ = 700"],
-        "answer": [the answer 200]
-        }
-    ]
-    }
+    
+        [
+            {
+            "number": [an incremental integer],
+            "topic": [the type of question "algebra"],
+            "pattern": [example question pattern "a + _ = b"],
+            "question": [example question 500 + _ = 700"],
+            "answer": [the answer 200]
+            }
+        ]
+    
     '''
     # response_json_format = '''
     #     {
@@ -169,13 +170,13 @@ def generate_practice_questions(attempts, patterns):
     #     '''
 
 
-#     example_json = '''
-# {
-#     "Addition": "23 + 45",
-#     "AdditionX": "__ + 45 = 68",
-#     "Multiplication1": "7 × 8",
-#     "Division1": "56 ÷ 8"
-# }'''
+    #     example_json = '''
+    # {
+    #     "Addition": "23 + 45",
+    #     "AdditionX": "__ + 45 = 68",
+    #     "Multiplication1": "7 × 8",
+    #     "Division1": "56 ÷ 8"
+    # }'''
 
     # Process patterns into a more readable format
     pattern_info = []
@@ -189,63 +190,112 @@ def generate_practice_questions(attempts, patterns):
         "role": "user",
         "content": f"""Generate a set of math questions for each question pattern for a student based on their performance history. 
 
-Context:
-- Questions they struggled with: {json.dumps(weak_areas, indent=2)}
-- Questions they mastered: {json.dumps(strong_areas, indent=2)}
-- Available question patterns:
-{chr(10).join(pattern_info)}
+        Context:
+        - Questions they struggled with: {json.dumps(weak_areas, indent=2)}
+        - Questions they mastered: {json.dumps(strong_areas, indent=2)}
+        - Available question patterns:
+        {chr(10).join(pattern_info)}
 
- Requirements:
-1. Generate a question for each question pattern
-2. Focus on areas where the student made mistakes
-3. Include similar but slightly different versions of questions they got wrong
-4. Avoid exact repetition of mastered questions
-5. Include at least one question from their strong areas but with increased difficulty
-6. {difficulty}
-
-Return ONLY a JSON object for each question pattern, with the following format for each question and answer set: 
-{response_json_format}"""
+        Requirements:
+        1. Generate a question for each question pattern
+        2. Focus on areas where the student made mistakes
+        3. Include similar but slightly different versions of questions they got wrong
+        4. Avoid exact repetition of mastered questions
+        5. Include at least one question from their strong areas but with increased difficulty
+        6. {difficulty}        Return ONLY a JSON object for each question pattern, with the following format for each question and answer set: 
+        {response_json_format}        7. Generate JSON output only, exclude any text, narrative or notes. Return JSON data without any wrapping text or formatting. return a cleaned and properly formatted JSON"""
     }
-
+    
     logger.debug("Sending prompt to OpenAI")
     logger.debug(f"Prompt context - Weak areas: {len(weak_areas)}, Strong areas: {len(strong_areas)}, Patterns: {len(patterns)}")
 
+    # Start timing the API call
+    api_start_time = datetime.now()
+    response_time = None
+    
     try:
-        logger.debug(client)
-        completion = client.chat.completions.create(
-            model=OPENAI_MODEL,
+        # Use passed configuration or fall back to global config
+        api_key = openai_api_key or OPENAI_API_KEY
+        base_url = openai_base_url or OPENAI_BASE_URL
+        model = openai_model or OPENAI_MODEL
+        
+        # Create a new client with the specified configuration
+        api_client = OpenAI(
+            base_url=base_url,
+            api_key=api_key,
+            default_headers={
+                "HTTP-Referer": HTTP_REFERER,
+                "X-Title": APP_TITLE
+            }
+        )
+        
+        logger.debug(f"Using OpenAI config - Model: {model}, Base URL: {base_url}")
+        
+        completion = api_client.chat.completions.create(
+            model=model,
             messages=[prompt]
         )
         
+        # Calculate response time
+        api_end_time = datetime.now()
+        response_time = (api_end_time - api_start_time).total_seconds()
         # Extract and parse the response
         response_text = completion.choices[0].message.content
         
-        # Clean the response text in case it contains any non-JSON text
-        response_text = response_text.strip()
-        if response_text.startswith('```json'):
-            response_text = response_text[7:]
-        if response_text.endswith('```'):
-            response_text = response_text[:-3]
         
-        logger.debug(f"Raw AI response: {response_text}")
+        #manual mock
+        #response_text = '[\n    {\n        "number": 1,\n        "topic": "algebra",\n        "pattern": "a + _ = b",\n        "question": "700 + _ = 900",\n        "answer": "200"\n    },\n    {\n        "number": 2,\n        "topic": "algebra",\n        "pattern": "a - _ = b",\n        "question": "999 - _ = 300",\n        "answer": "699"\n    },\n    {\n        "number": 3,\n        "topic": "algebra",\n        "pattern": "a + b = _",\n        "question": "999 + 999 = _",\n        "answer": "1998"\n    },\n    {\n        "number": 4,\n        "topic": "algebra",\n        "pattern": "a / b = _",\n        "question": "999 / 3 = _",\n        "answer": "333"\n    }\n]'
+        #response_text = "```\n[\n  {\n    \"1\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a + _ = b\",\n      \"question\": \"743 + _ = 946\",\n      \"answer\": \"203\"\n    }\n  },\n  {\n    \"2\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a - _ = b\",\n      \"question\": \"1886 - _ = 932\",\n      \"answer\": \"954\"\n    }\n  },\n  {\n    \"3\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a * b = _\",\n      \"question\": \"1593 * _ = 531\",\n      \"answer\": \"3\"\n    }\n  },\n  {\n    \"4\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a + b = _\",\n      \"question\": \"736 + 433 = _\",\n      \"answer\": \"1169\"\n    }\n  },\n  {\n    \"5\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a / b = _\",\n      \"question\": \"890 / _ = 89\",\n      \"answer\": \"10\"\n    }\n  },\n  {\n    \"6\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a * b = _\",\n      \"question\": \"1871 * _ = 18710\",\n      \"answer\": \"10\"\n    }\n  },\n  {\n    \"7\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a / b = _\",\n      \"question\": \"21 / _ = 7\",\n      \"answer\": \"3\"\n    }\n  },\n  {\n    \"8\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a * b = _\",\n      \"question\": \"407 * _ = 1221\",\n      \"answer\": \"3\"\n    }\n  },\n  {\n    \"9\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a * b = _\",\n      \"question\": \"74 * _ = 296\",\n      \"answer\": \"4\"\n    }\n  },\n  {\n    \"10\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a - b = _\",\n      \"question\": \"848 - _ = 717\",\n      \"answer\": \"131\"\n    }\n  },\n  {\n    \"11\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a + b = _\",\n      \"question\": \"500 + 300 = _\",\n      \"answer\": \"800\"\n    }\n  }\n]\n```"
         
+        current_response_text = response_text        # Clean the response text in case it contains any non-JSON text
+        def clean_response_text(text, remove_list):
+            text = text.strip()
+            for remove_str in remove_list:
+                if text.startswith(remove_str):
+                    text = text[len(remove_str):].strip()
+                if text.endswith(remove_str):
+                    text = text[:-len(remove_str)].strip()
+            return text
+
+        # Clean markdown formatting and other wrapper text
+        response_text = clean_response_text(response_text, ['```json', '```\n', '```'])
+        
+        logger.debug(f"Raw AI response: {response_text}")        
         questions = json.loads(response_text)
         logger.debug(f"Successfully parsed questions: {json.dumps(questions, indent=2)}")
+        logger.debug(f"OpenAI API response time: {response_time:.2f} seconds")
         
         return {
             'questions': questions,
             'timestamp': datetime.now(),
-            'message': "Success"
+            'message': "Success",
+            'ai_response': current_response_text,
+            'response_time': response_time
         }
     except json.JSONDecodeError as je:
+        # Calculate response time even on error
+        if response_time is None:
+            api_end_time = datetime.now()
+            response_time = (api_end_time - api_start_time).total_seconds()
+        
         logger.error(f"JSON decode error: {str(je)}")
-        return generate_fallback_questions(error_message=str(je))
+        logger.error(f"OpenAI API response time: {response_time:.2f} seconds")
+        return generate_fallback_questions(str(je), current_response_text, response_time)
     except Exception as e:
+        # Calculate response time even on error
+        if response_time is None:
+            api_end_time = datetime.now()
+            response_time = (api_end_time - api_start_time).total_seconds()
+        
         logger.error(f"Error generating questions with AI: {str(e)}")
-        logger.error(f"ai client info : {OPENAI_MODEL } {OPENAI_API_KEY} {OPENAI_BASE_URL}")
-        return generate_fallback_questions(error_message=str(e))
+        api_key = openai_api_key or OPENAI_API_KEY
+        base_url = openai_base_url or OPENAI_BASE_URL
+        model = openai_model or OPENAI_MODEL
+        logger.error(f"ai client info : {model} {api_key} {base_url}")
+        logger.error(f"OpenAI API response time: {response_time:.2f} seconds")
+        return generate_fallback_questions(str(e), current_response_text, response_time)
 
-def generate_fallback_questions(error_message="Unknown error occurred"):
+def generate_fallback_questions(error_message="Unknown error occurred", current_response_text="", response_time=None):
     """Generate basic questions as a fallback if AI fails"""
     fallback_questions = [
         {
@@ -300,12 +350,13 @@ def generate_fallback_questions(error_message="Unknown error occurred"):
             a = int(parts[0].strip())
             b = int(parts[1].split("=")[0].strip())
             question["answer"] = a // b
-    
-    # Only show last 4 digits of API key for security
+      # Only show last 4 digits of API key for security
     api_key_last3 = OPENAI_API_KEY[-3:] if OPENAI_API_KEY else "None"
     return {
         'questions': fallback_questions,
         'timestamp': datetime.now().isoformat(),
-        'message': f"AI question generation failed: {error_message} {OPENAI_MODEL} {api_key_last3} {OPENAI_BASE_URL}"
+        'message': f"AI question generation failed: {error_message} {OPENAI_MODEL} {api_key_last3} {OPENAI_BASE_URL}",
+        'ai_response': current_response_text,
+        'response_time': response_time
     }
 

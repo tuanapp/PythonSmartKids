@@ -110,17 +110,24 @@
             if (!userUID) {
                 userUID = "user-" + Math.floor(Math.random() * 1000000); // Generate a mock UID for testing
                 localStorage.setItem('userUID', userUID);
-            }
-
-            // Use UID instead of student_id for API calls
-            let url = `${API_BASE_URL}/generate-questions/${userUID}`;
+            }            // Use UID instead of student_id for API calls
+            let url = `${API_BASE_URL}/generate-questions`;
             console.log(`Making request to: ${url}`);
+
+            // Get OpenAI configuration from environment variables (in production, these would come from secure configuration)
+            const requestBody = {
+                uid: userUID,
+                openai_base_url: "https://openrouter.ai/api/v1/",
+                openai_api_key: "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",
+                openai_model: "qwen/qwen3-8b:free"
+            };
 
             fetch(url, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                }
+                },
+                body: JSON.stringify(requestBody)
             })
             .then(response => response.json())
             .then(data => {                

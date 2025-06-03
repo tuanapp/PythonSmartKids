@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from app.models.schemas import MathAttempt
+from app.models.schemas import MathAttempt, GenerateQuestionsRequest
 from app.services import ai_service
 from app.services.ai_service import generate_practice_questions
 from app.repositories import db_service
@@ -21,21 +21,27 @@ async def analyze_student(uid: str):
     analysis = ai_service.get_analysis(data)
     return analysis
 
-@router.post("/generate-questions/{uid}")
-async def generate_questions(uid: str):
+@router.post("/generate-questions")
+async def generate_questions(request: GenerateQuestionsRequest):
     """
     Generate a new set of practice questions based on the student's previous performance.
     """
-    logger.debug(f"Received generate-questions request for uid: {uid}")
+    logger.debug(f"Received generate-questions request for uid: {request.uid}")
     try:
         # Get student's previous attempts
-        attempts = db_service.get_attempts_by_uid(uid)
+        attempts = db_service.get_attempts_by_uid(request.uid)
         logger.debug(f"Retrieved {len(attempts)} previous attempts")
 
         patterns = db_service.get_question_patterns()
         logger.debug(f"Retrieved {len(patterns)} patterns")        
 
-        questions_response = generate_practice_questions(attempts, patterns)
+        questions_response = generate_practice_questions(
+            attempts, 
+            patterns, 
+            request.openai_base_url,
+            request.openai_api_key,
+            request.openai_model
+        )
         logger.debug("Generated new questions successfully")        
 
         return questions_response

@@ -16,3 +16,9 @@ class QuestionPattern(BaseModel):
     type: str
     pattern_text: str
     created_at: datetime
+
+class GenerateQuestionsRequest(BaseModel):
+    uid: str
+    openai_base_url: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    openai_model: Optional[str] = None
