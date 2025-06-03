@@ -5,7 +5,7 @@ import random
 from datetime import datetime, timedelta
 import logging
 
-#current_response_text = ""
+current_response_text = ""
 logger = logging.getLogger(__name__)
 client = OpenAI(
     base_url=OPENAI_BASE_URL,
@@ -207,13 +207,16 @@ def generate_practice_questions(attempts, patterns, openai_base_url=None, openai
     }
     
     logger.debug("Sending prompt to OpenAI")
-    logger.debug(f"Prompt context - Weak areas: {len(weak_areas)}, Strong areas: {len(strong_areas)}, Patterns: {len(patterns)}")
-
-    # Start timing the API call
+    logger.debug(f"Prompt context - Weak areas: {len(weak_areas)}, Strong areas: {len(strong_areas)}, Patterns: {len(patterns)}")    # Start timing the API call
     api_start_time = datetime.now()
     response_time = None
     
+    # Initialize global variable to avoid UnboundLocalError
+    global current_response_text
+    current_response_text = ""
+    
     try:
+        
         # Use passed configuration or fall back to global config
         api_key = openai_api_key or OPENAI_API_KEY
         base_url = openai_base_url or OPENAI_BASE_URL
