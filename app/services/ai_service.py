@@ -135,12 +135,10 @@ def generate_practice_questions(attempts, patterns, openai_base_url=None, openai
         else:
             strong_areas.append(question_info)
     
-    logger.debug(f"Found {len(weak_areas)} weak areas and {len(strong_areas)} strong areas")
-
-    # If no valid attempts, use fallback questions
+    logger.debug(f"Found {len(weak_areas)} weak areas and {len(strong_areas)} strong areas")    # If no valid attempts, use fallback questions
     if not valid_attempts:
         logger.debug("No valid attempts found, using fallback questions")
-        #return generate_fallback_questions()
+        return generate_fallback_questions("No valid attempts found")
 
     # Create example JSON separately to avoid f-string issues
     response_json_format = '''
@@ -354,8 +352,7 @@ def generate_fallback_questions(error_message="Unknown error occurred", current_
             "answer": None  # Will be calculated below
         }
     ]
-    
-    # Calculate answers for each question
+      # Calculate answers for each question
     for question in fallback_questions:
         if "a + b = _" in question["pattern"]:
             parts = question["question"].split("+")
@@ -377,11 +374,12 @@ def generate_fallback_questions(error_message="Unknown error occurred", current_
             a = int(parts[0].strip())
             b = int(parts[1].split("=")[0].strip())
             question["answer"] = a // b
-      # Only show last 4 digits of API key for security
+    
+    # Only show last 4 digits of API key for security
     api_key_last3 = OPENAI_API_KEY[-3:] if OPENAI_API_KEY else "None"
     return {
         'questions': fallback_questions,
-        'timestamp': datetime.now().isoformat(),
+        'timestamp': datetime.now(),
         'message': f"AI question generation failed: {error_message} {OPENAI_MODEL} {api_key_last3} {OPENAI_BASE_URL}",
         'ai_response': current_response_text,
         'response_time': response_time

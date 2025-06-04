@@ -138,20 +138,18 @@ class TestAIServiceIntegration:
             
             # Call the function
             result = generate_practice_questions(attempts, patterns)
-            
-            # Assertions to verify the response format
+              # Assertions to verify the response format
             assert isinstance(result, dict), "Response should be a dictionary"
             assert "questions" in result, "Response should have a 'questions' key"
             assert "timestamp" in result, "Response should have a 'timestamp' key"
-            assert isinstance(result["questions"], dict), "Questions should be a dictionary in the result"
+            assert isinstance(result["questions"], list), "Questions should be a list in the result"
             assert isinstance(result["timestamp"], (datetime, type(None))), "Timestamp should be a datetime or None"
             
             # Validate the questions format in the response
             questions = result["questions"]
-            assert "questions" in questions, "The questions object should have a 'questions' key"
-            assert isinstance(questions["questions"], list), "questions['questions'] should be a list"
+            assert isinstance(questions, list), "questions should be a list"
             
-            for question in questions["questions"]:
+            for question in questions:
                 assert "number" in question, "Each question should have a 'number' field"
                 assert "topic" in question, "Each question should have a 'topic' field"
                 assert "pattern" in question, "Each question should have a 'pattern' field"
