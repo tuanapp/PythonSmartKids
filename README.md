@@ -444,3 +444,19 @@ The testing framework uses:
 - `tests/pytest_fixtures.py` for reusable test fixtures
 
 See `tests/README.md` for detailed information about test organization and best practices.
+
+## Documentation
+
+All project documentation is organized in the [`docs/`](docs/) folder for better maintainability:
+
+### 📚 Available Documentation
+
+- **[`docs/DATABASE_README.md`](docs/DATABASE_README.md)** - Database setup, configuration, and operations
+- **[`docs/TEST_MIGRATION_COMPLETE.md`](docs/TEST_MIGRATION_COMPLETE.md)** - Complete test organization migration report
+- **[`docs/TEST_ORGANIZATION_PLAN.md`](docs/TEST_ORGANIZATION_PLAN.md)** - Test migration planning documentation
+- **[`docs/VERCEL_DEPLOYMENT.md`](docs/VERCEL_DEPLOYMENT.md)** - Vercel deployment configuration and setup
+- **[`docs/WORKSPACE_STRUCTURE.md`](docs/WORKSPACE_STRUCTURE.md)** - Project workspace organization and structure
+
+### 📖 Quick Access
+
+For comprehensive documentation overview and navigation, see **[`docs/README.md`](docs/README.md)**.
