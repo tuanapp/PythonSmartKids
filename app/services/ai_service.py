@@ -1,6 +1,7 @@
 import json
 from openai import OpenAI
 from app.config import OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_MODEL, HTTP_REFERER, APP_TITLE
+from app.validators.response_validator import OpenAIResponseValidator
 import random
 from datetime import datetime, timedelta
 import logging
@@ -241,8 +242,7 @@ def generate_practice_questions(attempts, patterns, openai_base_url=None, openai
         
         # Calculate response time
         api_end_time = datetime.now()
-        response_time = (api_end_time - api_start_time).total_seconds()
-        # Extract and parse the response
+        response_time = (api_end_time - api_start_time).total_seconds()        # Extract and parse the response
         response_text = completion.choices[0].message.content
         
         
@@ -250,31 +250,55 @@ def generate_practice_questions(attempts, patterns, openai_base_url=None, openai
         #response_text = '[\n    {\n        "number": 1,\n        "topic": "algebra",\n        "pattern": "a + _ = b",\n        "question": "700 + _ = 900",\n        "answer": "200"\n    },\n    {\n        "number": 2,\n        "topic": "algebra",\n        "pattern": "a - _ = b",\n        "question": "999 - _ = 300",\n        "answer": "699"\n    },\n    {\n        "number": 3,\n        "topic": "algebra",\n        "pattern": "a + b = _",\n        "question": "999 + 999 = _",\n        "answer": "1998"\n    },\n    {\n        "number": 4,\n        "topic": "algebra",\n        "pattern": "a / b = _",\n        "question": "999 / 3 = _",\n        "answer": "333"\n    }\n]'
         #response_text = "```\n[\n  {\n    \"1\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a + _ = b\",\n      \"question\": \"743 + _ = 946\",\n      \"answer\": \"203\"\n    }\n  },\n  {\n    \"2\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a - _ = b\",\n      \"question\": \"1886 - _ = 932\",\n      \"answer\": \"954\"\n    }\n  },\n  {\n    \"3\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a * b = _\",\n      \"question\": \"1593 * _ = 531\",\n      \"answer\": \"3\"\n    }\n  },\n  {\n    \"4\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a + b = _\",\n      \"question\": \"736 + 433 = _\",\n      \"answer\": \"1169\"\n    }\n  },\n  {\n    \"5\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a / b = _\",\n      \"question\": \"890 / _ = 89\",\n      \"answer\": \"10\"\n    }\n  },\n  {\n    \"6\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a * b = _\",\n      \"question\": \"1871 * _ = 18710\",\n      \"answer\": \"10\"\n    }\n  },\n  {\n    \"7\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a / b = _\",\n      \"question\": \"21 / _ = 7\",\n      \"answer\": \"3\"\n    }\n  },\n  {\n    \"8\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a * b = _\",\n      \"question\": \"407 * _ = 1221\",\n      \"answer\": \"3\"\n    }\n  },\n  {\n    \"9\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a * b = _\",\n      \"question\": \"74 * _ = 296\",\n      \"answer\": \"4\"\n    }\n  },\n  {\n    \"10\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a - b = _\",\n      \"question\": \"848 - _ = 717\",\n      \"answer\": \"131\"\n    }\n  },\n  {\n    \"11\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a + b = _\",\n      \"question\": \"500 + 300 = _\",\n      \"answer\": \"800\"\n    }\n  }\n]\n```"
         
-        current_response_text = response_text        # Clean the response text in case it contains any non-JSON text
-        def clean_response_text(text, remove_list):
-            text = text.strip()
-            for remove_str in remove_list:
-                if text.startswith(remove_str):
-                    text = text[len(remove_str):].strip()
-                if text.endswith(remove_str):
-                    text = text[:-len(remove_str)].strip()
-            return text
-
-        # Clean markdown formatting and other wrapper text
-        response_text = clean_response_text(response_text, ['```json', '```\n', '```'])
+        current_response_text = response_text
         
-        logger.debug(f"Raw AI response: {response_text}")        
-        questions = json.loads(response_text)
-        logger.debug(f"Successfully parsed questions: {json.dumps(questions, indent=2)}")
-        logger.debug(f"OpenAI API response time: {response_time:.2f} seconds")
+        # Validate the AI response using the comprehensive validator
+        validator = OpenAIResponseValidator()
+        validation_result = validator.validate_partial_response(response_text, min_questions=1)
         
-        return {
-            'questions': questions,
-            'timestamp': datetime.now(),
-            'message': "Success",
-            'ai_response': current_response_text,
-            'response_time': response_time
-        }
+        logger.debug(f"Validation result: {validation_result['is_valid']}")
+        if validation_result['errors']:
+            logger.warning(f"Validation errors: {validation_result['errors']}")
+        if validation_result['warnings']:
+            logger.info(f"Validation warnings: {validation_result['warnings']}")
+        
+        # Log validation summary
+        validation_summary = validator.get_validation_summary(validation_result)
+        logger.info(f"Response validation summary:\n{validation_summary}")
+        
+        if validation_result['is_valid']:
+            questions = validation_result['questions']
+            logger.debug(f"Successfully validated {len(questions)} questions")
+            logger.debug(f"OpenAI API response time: {response_time:.2f} seconds")
+            
+            return {
+                'questions': questions,
+                'timestamp': datetime.now(),
+                'message': "Success",
+                'ai_response': current_response_text,
+                'response_time': response_time,
+                'validation_result': {
+                    'is_valid': validation_result['is_valid'],
+                    'is_partial': validation_result.get('is_partial', False),
+                    'questions_validated': len(questions),
+                    'errors_count': len(validation_result['errors']),
+                    'warnings_count': len(validation_result['warnings'])
+                }
+            }
+        else:
+            # If validation fails, fall back to fallback questions but include validation info
+            logger.error("AI response validation failed, using fallback questions")
+            fallback_result = generate_fallback_questions(
+                f"Validation failed: {'; '.join(validation_result['errors'][:3])}", 
+                current_response_text, 
+                response_time
+            )
+            fallback_result['validation_result'] = {
+                'is_valid': False,
+                'original_errors': validation_result['errors'],
+                'original_warnings': validation_result['warnings']
+            }
+            return fallback_result
     except json.JSONDecodeError as je:
         # Calculate response time even on error
         if response_time is None:
