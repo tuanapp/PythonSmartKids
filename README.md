@@ -357,3 +357,90 @@ set RUN_REAL_API_TESTS=True && python -m pytest -m real -v
 $env:RUN_REAL_API_TESTS="True"; python -m pytest -m real -v
 
 This approach ensures that your real API tests won't accidentally run and consume your API quota during normal development and CI/CD workflows.
+
+## Testing
+
+The project uses a comprehensive testing framework with organized test categories for better maintainability and development workflow.
+
+### Test Organization
+
+Tests are organized in the `tests/` directory with the following structure:
+
+```
+tests/
+├── unit/           # Unit tests for isolated components
+├── integration/    # Integration tests for multiple components
+├── e2e/           # End-to-end tests for full system
+├── real/          # Tests that use real external services
+├── manual/        # Manual test scripts for development
+└── fixtures/      # Test data and fixtures
+```
+
+### Running Tests
+
+#### Run All Tests
+```bash
+python -m pytest
+```
+
+#### Run Tests by Category
+```bash
+# Unit tests only (fast, isolated)
+python -m pytest tests/unit/ -v
+
+# Integration tests (multiple components)
+python -m pytest tests/integration/ -v
+
+# Real API tests (requires API credentials)
+python -m pytest tests/real/ -v
+
+# Manual development tests
+python -m pytest tests/manual/ -v
+```
+
+#### Run Tests by Markers
+```bash
+# Run only unit tests
+python -m pytest -m unit -v
+
+# Run only integration tests
+python -m pytest -m integration -v
+
+# Run tests that don't require external services
+python -m pytest -m "not real" -v
+
+# Run slow tests
+python -m pytest -m slow -v
+
+# Run Neon database tests
+python -m pytest -m neon -v
+```
+
+### Test Categories Explained
+
+- **Unit Tests**: Test individual components in isolation with mocked dependencies
+- **Integration Tests**: Test multiple components working together
+- **Real Tests**: Test actual external API calls (requires credentials)
+- **Manual Tests**: Development scripts for testing specific scenarios
+- **E2E Tests**: Full system tests from user perspective
+
+### Environment Setup for Testing
+
+For tests that require external services:
+
+1. **Real API Tests**: Set `RUN_REAL_API_TESTS=True` in `.env` file or override at runtime:
+   ```bash
+   # PowerShell
+   $env:RUN_REAL_API_TESTS="True"; python -m pytest -m real -v
+   ```
+
+2. **Database Tests**: Ensure database connection strings are properly configured in your environment
+
+### Test Configuration
+
+The testing framework uses:
+- `pytest.ini` for main configuration
+- `tests/conftest.py` for shared fixtures and pytest setup
+- `tests/pytest_fixtures.py` for reusable test fixtures
+
+See `tests/README.md` for detailed information about test organization and best practices.
