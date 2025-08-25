@@ -27,4 +27,4 @@ app.include_router(routes.router)
 @app.get("/")
 def root():
     logger.debug("Root endpoint accessed")
-    return {"message": "Welcome to the Math Learning API"}
+    return {"message": "Welcome to the Math Learning API - last updated 2025-08-25 with Forge Bridge for AI"}
