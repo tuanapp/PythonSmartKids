@@ -49,9 +49,9 @@ def test_generate_questions_endpoint():
     if openai_api_key:
         payload_custom = {
             "uid": "test_user_456",
-            "openai_api_key": openai_api_key,
-            "openai_model": "gpt-3.5-turbo",
-            "openai_base_url": "https://api.openai.com/v1"
+            "ai_bridge_api_key": openai_api_key,
+            "ai_bridge_model": "Gemini/models/gemini-2.0-flash",
+            "ai_bridge_base_url": "https://api.forge.tensorblock.co/v1/chat/completions"
         }
         
         try:

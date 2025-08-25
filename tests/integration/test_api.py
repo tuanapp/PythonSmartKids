@@ -69,9 +69,9 @@ def test_generate_questions_unit(mock_generate_practice_questions, mock_db_servi
     # Make request
     request_data = {
         "uid": uid,
-        "openai_base_url": None,
-        "openai_api_key": None,
-        "openai_model": None
+        "ai_bridge_base_url": None,
+        "ai_bridge_api_key": None,
+        "ai_bridge_model": None
     }
     response = client.post("/generate-questions", json=request_data)
     
@@ -93,9 +93,9 @@ def test_generate_questions_handles_exceptions(mock_generate_practice_questions,
     # Make request
     request_data = {
         "uid": "test-firebase-uid",
-        "openai_base_url": None,
-        "openai_api_key": None,
-        "openai_model": None
+        "ai_bridge_base_url": None,
+        "ai_bridge_api_key": None,
+        "ai_bridge_model": None
     }
     response = client.post("/generate-questions", json=request_data)
     
@@ -133,9 +133,9 @@ def test_generate_questions_with_empty_attempts(mock_generate_practice_questions
     test_uid = "test-empty-attempts"
     request_data = {
         "uid": test_uid,
-        "openai_base_url": None,
-        "openai_api_key": None,
-        "openai_model": None
+        "ai_bridge_base_url": None,
+        "ai_bridge_api_key": None,
+        "ai_bridge_model": None
     }
     response = client.post("/generate-questions", json=request_data)
     

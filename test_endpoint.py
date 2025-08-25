@@ -9,13 +9,13 @@ app = FastAPI()
 app.include_router(router)
 client = TestClient(app)
 
-def test_with_custom_openai_config():
-    """Test with custom OpenAI parameters"""
+def test_with_custom_ai_bridge_config():
+    """Test with custom AI Bridge parameters"""
     request_data = {
         'uid': 'test-firebase-uid-api-1',
-        'openai_base_url': 'https://api.openai.com/v1',
-        'openai_api_key': 'test-key',
-        'openai_model': 'gpt-4'
+        'ai_bridge_base_url': 'https://api.forge.tensorblock.co/v1/chat/completions',
+        'ai_bridge_api_key': 'forge-test-key',
+        'ai_bridge_model': 'Gemini/models/gemini-2.0-flash'
     }
     response = client.post('/generate-questions', json=request_data)
     print(f'Status: {response.status_code}')
@@ -28,13 +28,13 @@ def test_with_custom_openai_config():
     else:
         print(f'Error response: {response.text}')
 
-def test_with_none_openai_config():
-    """Test with None OpenAI parameters (uses defaults)"""
+def test_with_none_ai_bridge_config():
+    """Test with None AI Bridge parameters (uses defaults)"""
     request_data = {
         'uid': 'test-firebase-uid-api-2',
-        'openai_base_url': None,
-        'openai_api_key': None,
-        'openai_model': None
+        'ai_bridge_base_url': None,
+        'ai_bridge_api_key': None,
+        'ai_bridge_model': None
     }
     response = client.post('/generate-questions', json=request_data)
     print(f'\nStatus: {response.status_code}')
@@ -48,8 +48,8 @@ def test_with_none_openai_config():
         print(f'Error response: {response.text}')
 
 if __name__ == "__main__":
-    print("Testing generate-questions endpoint with custom OpenAI config:")
-    test_with_custom_openai_config()
+    print("Testing generate-questions endpoint with custom AI Bridge config:")
+    test_with_custom_ai_bridge_config()
     
-    print("\nTesting generate-questions endpoint with default OpenAI config:")
-    test_with_none_openai_config()
+    print("\nTesting generate-questions endpoint with default AI Bridge config:")
+    test_with_none_ai_bridge_config()

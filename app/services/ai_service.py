@@ -1,6 +1,6 @@
 import json
 from openai import OpenAI
-from app.config import OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_MODEL, HTTP_REFERER, APP_TITLE
+from app.config import AI_BRIDGE_BASE_URL, AI_BRIDGE_API_KEY, AI_BRIDGE_MODEL, HTTP_REFERER, APP_TITLE
 from app.validators.response_validator import OpenAIResponseValidator
 import random
 from datetime import datetime, timedelta
@@ -9,8 +9,8 @@ import logging
 current_response_text = ""
 logger = logging.getLogger(__name__)
 client = OpenAI(
-    base_url=OPENAI_BASE_URL,
-    api_key=OPENAI_API_KEY,
+    base_url=AI_BRIDGE_BASE_URL,
+    api_key=AI_BRIDGE_API_KEY,
     default_headers={
         "HTTP-Referer": HTTP_REFERER,
         "X-Title": APP_TITLE
@@ -35,7 +35,7 @@ def get_analysis(student_data):
     print("Attempts:", messages)
     
     completion = client.chat.completions.create(
-        model=OPENAI_MODEL,
+        model=AI_BRIDGE_MODEL,
         messages=messages
     )
 
@@ -103,7 +103,7 @@ def analyze_attempts(attempts):
     
     return weak_areas, number_ranges
 
-def generate_practice_questions(attempts, patterns, openai_base_url=None, openai_api_key=None, openai_model=None):
+def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_bridge_api_key=None, ai_bridge_model=None):
     """
     Generate questions using AI, focusing on student's weak areas based on their attempt history.
     """
@@ -217,9 +217,9 @@ def generate_practice_questions(attempts, patterns, openai_base_url=None, openai
     try:
         
         # Use passed configuration or fall back to global config
-        api_key = openai_api_key or OPENAI_API_KEY
-        base_url = openai_base_url or OPENAI_BASE_URL
-        model = openai_model or OPENAI_MODEL
+        api_key = ai_bridge_api_key or AI_BRIDGE_API_KEY
+        base_url = ai_bridge_base_url or AI_BRIDGE_BASE_URL
+        model = ai_bridge_model or AI_BRIDGE_MODEL
         
         # Create a new client with the specified configuration
         api_client = OpenAI(
@@ -231,7 +231,7 @@ def generate_practice_questions(attempts, patterns, openai_base_url=None, openai
             }
         )
         
-        logger.debug(f"Using OpenAI config - Model: {model}, Base URL: {base_url}")
+        logger.debug(f"Using AI Bridge config - Model: {model}, Base URL: {base_url}")
         
         completion = api_client.chat.completions.create(
             model=model,
@@ -267,7 +267,7 @@ def generate_practice_questions(attempts, patterns, openai_base_url=None, openai
         if validation_result['is_valid']:
             questions = validation_result['questions']
             logger.debug(f"Successfully validated {len(questions)} questions")
-            logger.debug(f"OpenAI API response time: {response_time:.2f} seconds")
+            logger.debug(f"AI Bridge API response time: {response_time:.2f} seconds")
             
             return {
                 'questions': questions,
@@ -304,7 +304,7 @@ def generate_practice_questions(attempts, patterns, openai_base_url=None, openai
             response_time = (api_end_time - api_start_time).total_seconds()
         
         logger.error(f"JSON decode error: {str(je)}")
-        logger.error(f"OpenAI API response time: {response_time:.2f} seconds")
+        logger.error(f"AI Bridge API response time: {response_time:.2f} seconds")
         return generate_fallback_questions(str(je), current_response_text, response_time)
     except Exception as e:
         # Calculate response time even on error
@@ -313,11 +313,11 @@ def generate_practice_questions(attempts, patterns, openai_base_url=None, openai
             response_time = (api_end_time - api_start_time).total_seconds()
         
         logger.error(f"Error generating questions with AI: {str(e)}")
-        api_key = openai_api_key or OPENAI_API_KEY
-        base_url = openai_base_url or OPENAI_BASE_URL
-        model = openai_model or OPENAI_MODEL
+        api_key = ai_bridge_api_key or AI_BRIDGE_API_KEY
+        base_url = ai_bridge_base_url or AI_BRIDGE_BASE_URL
+        model = ai_bridge_model or AI_BRIDGE_MODEL
         logger.error(f"ai client info : {model} {api_key} {base_url}")
-        logger.error(f"OpenAI API response time: {response_time:.2f} seconds")
+        logger.error(f"AI Bridge API response time: {response_time:.2f} seconds")
         return generate_fallback_questions(str(e), current_response_text, response_time)
 
 def generate_fallback_questions(error_message="Unknown error occurred", current_response_text="", response_time=None):
@@ -376,11 +376,11 @@ def generate_fallback_questions(error_message="Unknown error occurred", current_
             question["answer"] = a // b
     
     # Only show last 4 digits of API key for security
-    api_key_last3 = OPENAI_API_KEY[-3:] if OPENAI_API_KEY else "None"
+    api_key_last3 = AI_BRIDGE_API_KEY[-3:] if AI_BRIDGE_API_KEY else "None"
     return {
         'questions': fallback_questions,
         'timestamp': datetime.now(),
-        'message': f"AI question generation failed: {error_message} {OPENAI_MODEL} {api_key_last3} {OPENAI_BASE_URL}",
+        'message': f"AI question generation failed: {error_message} {AI_BRIDGE_MODEL} {api_key_last3} {AI_BRIDGE_BASE_URL}",
         'ai_response': current_response_text,
         'response_time': response_time
     }

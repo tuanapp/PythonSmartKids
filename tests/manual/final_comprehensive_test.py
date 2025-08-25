@@ -25,13 +25,13 @@ def run_comprehensive_test():
         print(f"Validation status: {data1.get('validation_status')}")
         print(f"First question: {data1.get('questions', [{}])[0].get('question', 'N/A')}")
     
-    # Test 2: With custom OpenAI configuration
-    print("\n✅ Test 2: Custom OpenAI configuration")
+    # Test 2: With custom AI Bridge configuration
+    print("\n✅ Test 2: Custom AI Bridge configuration")
     response2 = requests.post(f"{base_url}/generate-questions", json={
-        "uid": "test_user_openai", 
-        "openai_base_url": "https://api.openai.com/v1",
-        "openai_api_key": "test_key_123",
-        "openai_model": "gpt-3.5-turbo"
+        "uid": "test_user_ai_bridge", 
+        "ai_bridge_base_url": "https://api.forge.tensorblock.co/v1/chat/completions",
+        "ai_bridge_api_key": "forge-test-key-123",
+        "ai_bridge_model": "Gemini/models/gemini-2.0-flash"
     })
     print(f"Status: {response2.status_code}")
     if response2.status_code == 200:

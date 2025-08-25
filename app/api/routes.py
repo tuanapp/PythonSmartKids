@@ -38,9 +38,9 @@ async def generate_questions(request: GenerateQuestionsRequest):
         questions_response = generate_practice_questions(
             attempts, 
             patterns, 
-            request.openai_base_url,
-            request.openai_api_key,
-            request.openai_model
+            request.ai_bridge_base_url,
+            request.ai_bridge_api_key,
+            request.ai_bridge_model
         )
         logger.debug("Generated new questions successfully")        
 

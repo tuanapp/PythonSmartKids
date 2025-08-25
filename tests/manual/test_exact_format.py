@@ -8,9 +8,9 @@ def test_exact_client_format():
     # This is the exact payload from the client HTML
     payload = {
         "uid": "user-123456",
-        "openai_base_url": "https://openrouter.ai/api/v1/",
-        "openai_api_key": "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",
-        "openai_model": "qwen/qwen3-8b:free"
+        "ai_bridge_base_url": "https://api.forge.tensorblock.co/v1/chat/completions",
+        "ai_bridge_api_key": "forge-MGRk0dd31aa7edf58b0ca5b6cfffc7a70092",
+        "ai_bridge_model": "Gemini/models/gemini-2.0-flash"
     }
     
     url = "http://localhost:8000/generate-questions"
