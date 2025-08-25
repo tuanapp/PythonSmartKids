@@ -280,7 +280,8 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
                     'is_partial': validation_result.get('is_partial', False),
                     'questions_validated': len(questions),
                     'errors_count': len(validation_result['errors']),
-                    'warnings_count': len(validation_result['warnings'])
+                    'warnings_count': len(validation_result['warnings']),
+                    'ai_model': model
                 }
             }
         else:
