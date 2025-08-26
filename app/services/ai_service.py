@@ -1,6 +1,6 @@
 import json
 from openai import OpenAI
-from app.config import AI_BRIDGE_BASE_URL, AI_BRIDGE_API_KEY, AI_BRIDGE_MODEL, HTTP_REFERER, APP_TITLE
+from app.config import AI_BRIDGE_BASE_URL, AI_BRIDGE_API_KEY, AI_BRIDGE_MODEL, HTTP_REFERER, APP_TITLE, MAX_ATTEMPTS_HISTORY_LIMIT
 from app.validators.response_validator import OpenAIResponseValidator
 import random
 from datetime import datetime, timedelta
@@ -138,7 +138,7 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
     logger.debug(f"Found {len(weak_areas)} weak areas and {len(strong_areas)} strong areas")    # If no valid attempts, use fallback questions
     if not valid_attempts:
         logger.debug("No valid attempts found, using fallback questions")
-        return generate_fallback_questions("No valid attempts found")
+        return generate_fallback_questions("No valid attempts found", attempts=attempts)
 
     # Create example JSON separately to avoid f-string issues
     response_json_format = '''
@@ -281,7 +281,8 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
                     'questions_validated': len(questions),
                     'errors_count': len(validation_result['errors']),
                     'warnings_count': len(validation_result['warnings']),
-                    'ai_model': model
+                    'ai_model': model,
+                    'historical_records': f"{len(attempts)} db attempts used out of {MAX_ATTEMPTS_HISTORY_LIMIT} max"
                 }
             }
         else:
@@ -290,12 +291,14 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
             fallback_result = generate_fallback_questions(
                 f"Validation failed: {'; '.join(validation_result['errors'][:3])}", 
                 current_response_text, 
-                response_time
+                response_time,
+                attempts
             )
             fallback_result['validation_result'] = {
                 'is_valid': False,
                 'original_errors': validation_result['errors'],
-                'original_warnings': validation_result['warnings']
+                'original_warnings': validation_result['warnings'],
+                'historical_records': f"{len(attempts)} db attempts used out of {MAX_ATTEMPTS_HISTORY_LIMIT} max"
             }
             return fallback_result
     except json.JSONDecodeError as je:
@@ -306,7 +309,7 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
         
         logger.error(f"JSON decode error: {str(je)}")
         logger.error(f"AI Bridge API response time: {response_time:.2f} seconds")
-        return generate_fallback_questions(str(je), current_response_text, response_time)
+        return generate_fallback_questions(str(je), current_response_text, response_time, attempts)
     except Exception as e:
         # Calculate response time even on error
         if response_time is None:
@@ -319,9 +322,9 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
         model = ai_bridge_model or AI_BRIDGE_MODEL
         logger.error(f"ai client info : {model} {api_key} {base_url}")
         logger.error(f"AI Bridge API response time: {response_time:.2f} seconds")
-        return generate_fallback_questions(str(e), current_response_text, response_time)
+        return generate_fallback_questions(str(e), current_response_text, response_time, attempts)
 
-def generate_fallback_questions(error_message="Unknown error occurred", current_response_text="", response_time=None):
+def generate_fallback_questions(error_message="Unknown error occurred", current_response_text="", response_time=None, attempts=None):
     """Generate basic questions as a fallback if AI fails"""
     fallback_questions = [
         {
@@ -378,11 +381,22 @@ def generate_fallback_questions(error_message="Unknown error occurred", current_
     
     # Only show last 4 digits of API key for security
     api_key_last3 = AI_BRIDGE_API_KEY[-3:] if AI_BRIDGE_API_KEY else "None"
-    return {
+    
+    # Build the return response
+    result = {
         'questions': fallback_questions,
         'timestamp': datetime.now(),
         'message': f"AI question generation failed: {error_message} {AI_BRIDGE_MODEL} {api_key_last3} {AI_BRIDGE_BASE_URL}",
         'ai_response': current_response_text,
         'response_time': response_time
     }
+    
+    # Add historical records info if attempts data is available
+    if attempts is not None:
+        result['validation_result'] = {
+            'is_valid': False,
+            'historical_records': f"{len(attempts)} db attempts used out of {MAX_ATTEMPTS_HISTORY_LIMIT} max"
+        }
+    
+    return result
 

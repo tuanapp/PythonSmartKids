@@ -25,17 +25,90 @@ This project provides an API for tracking kids' math learning progress and using
     python app/db/db_init.py
     ```
 
-3. Run the API:
+3. **Install Additional Dependencies** (if needed):
 
     ```sh
-    uvicorn app.main:app --reload
+    pip install psycopg2-binary
     ```
 
-    locally it will be accessible via http://127.0.0.1:8000/
+4. **Run the API Server**:
 
-4. API Endpoints:
-    - `POST /submit_attempt` - Submit a math question attempt.
-    - `GET /analyze_student/{student_id}` - Get AI-powered analysis for weak areas.
+    For development with virtual environment:
+    ```sh
+    # Activate virtual environment first (if not already activated)
+    Scripts\Activate.ps1
+
+    # Run the server using the virtual environment Python
+    Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+    ```
+
+    Or using standard uvicorn (if globally installed):
+    ```sh
+    uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+    ```
+
+    **Server Access**:
+    - **Main API**: http://127.0.0.1:8000/
+    - **Interactive API Docs (Swagger)**: http://127.0.0.1:8000/docs
+    - **Alternative Docs (ReDoc)**: http://127.0.0.1:8000/redoc
+
+4. **API Endpoints**:
+
+    The API provides several endpoints for math learning functionality:
+
+    ### Core Endpoints
+
+    | Method | Endpoint | Description |
+    |--------|----------|-------------|
+    | `POST` | `/submit_attempt` | Submit a student's math question attempt for storage |
+    | `GET` | `/analyze_student/{uid}` | Get AI-powered analysis for student's weak areas |
+    | `POST` | `/generate-questions` | Generate personalized practice questions |
+    | `GET` | `/question-patterns` | Retrieve all available question patterns |
+
+    ### Endpoint Details
+
+    #### `POST /submit_attempt`
+    Submit a student's answer to a math question for tracking and analysis.
+    
+    **Request Body**: `MathAttempt` schema
+    ```json
+    {
+        "student_id": 123,
+        "uid": "firebase-user-uid",
+        "datetime": "2025-08-26T10:30:00",
+        "question": "What is 2 + 3?",
+        "is_answer_correct": true,
+        "incorrect_answer": null,
+        "correct_answer": "5"
+    }
+    ```
+
+    #### `GET /analyze_student/{uid}`
+    Get AI analysis of student performance and recommendations.
+    
+    **Response**: AI-generated analysis with weak areas and suggestions
+
+    #### `POST /generate-questions`
+    Generate new practice questions based on student's history.
+    
+    **Request Body**: `GenerateQuestionsRequest` schema
+    ```json
+    {
+        "uid": "firebase-user-uid",
+        "ai_bridge_base_url": "optional-custom-url",
+        "ai_bridge_api_key": "optional-custom-key",
+        "ai_bridge_model": "optional-custom-model"
+    }
+    ```
+
+    #### `GET /question-patterns`
+    Retrieve all available question patterns for question generation.
+    
+    **Response**: Array of question patterns with type and pattern text
+
+    ### Interactive Documentation
+    - **Swagger UI**: Available at `http://127.0.0.1:8000/docs` when running locally
+    - **ReDoc**: Available at `http://127.0.0.1:8000/redoc` for alternative documentation view
 
 
 Project Structure
@@ -89,6 +162,121 @@ my_project/
 - Used to store sensitive information (e.g., database URLs, API keys).
 - Prevents hardcoding secrets in the source code.
 - Add .env to .gitignore to prevent committing secrets
+
+## Environment Variables Configuration
+
+The application uses environment variables for configuration management. These can be set in the `.env` file for local development or as system environment variables in production.
+
+### Database Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_PROVIDER` | `neon` | Database provider (currently only 'neon' supported) |
+| `DATABASE_URL` | `""` | Full database connection URL |
+| `NEON_DBNAME` | `smartboydb` | Neon PostgreSQL database name |
+| `NEON_USER` | `tuanapp` | Neon database username |
+| `NEON_PASSWORD` | `HdzrNIKh5mM1` | Neon database password |
+| `NEON_HOST` | `ep-sparkling-butterfly-...` | Neon database host |
+| `NEON_SSLMODE` | `require` | SSL mode for database connection |
+
+### Backend Logic Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MAX_ATTEMPTS_HISTORY_LIMIT` | `20` | **Maximum number of historical attempts to retrieve from database. Controls how many recent student attempts are fetched for analysis and display. Useful for performance optimization and limiting data transfer.** |
+
+### AI Service Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPENAI_BASE_URL` | `https://openrouter.ai/api/v1/` | OpenAI API base URL |
+| `OPENAI_API_KEY` | `""` | OpenAI API key |
+| `OPENAI_MODEL` | `""` | OpenAI model to use |
+| `FORGE_BASE_URL` | `https://api.forge.tensorblock.co/v1` | AI Bridge (Forge) API base URL |
+| `FORGE_API_KEY` | `""` | AI Bridge API key |
+| `FORGE_AI_MODEL` | `Gemini/models/gemini-2.0-flash` | AI Bridge model to use |
+
+### Application Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HTTP_REFERER` | `https://github.com/tuanna0308/PythonSmartKids` | HTTP referer for API requests |
+| `APP_TITLE` | `PythonSmartKids` | Application title |
+
+### Testing Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RUN_REAL_API_TESTS` | `False` | Enable/disable tests that make real API calls |
+
+### Configuration Examples
+
+#### Local Development (.env file)
+```bash
+# Database query optimization
+MAX_ATTEMPTS_HISTORY_LIMIT=20
+
+# For testing with more data
+MAX_ATTEMPTS_HISTORY_LIMIT=100
+
+# For production with performance considerations
+MAX_ATTEMPTS_HISTORY_LIMIT=50
+```
+
+#### Production Environment Variables
+```bash
+# Set via system environment or deployment platform
+export MAX_ATTEMPTS_HISTORY_LIMIT=50
+export DATABASE_PROVIDER=neon
+export RUN_REAL_API_TESTS=False
+```
+
+## Deployment Configuration
+
+### Production Deployment Considerations
+
+1. **Environment Variables Security**:
+   - Never commit `.env` files to version control
+   - Use secure environment variable management in production
+   - Rotate API keys regularly
+
+2. **Database Configuration**:
+   - Use connection pooling for better performance
+   - Configure appropriate `MAX_ATTEMPTS_HISTORY_LIMIT` based on your data volume
+   - Monitor database performance and adjust limits accordingly
+
+3. **Performance Optimization**:
+   ```bash
+   # For high-traffic applications
+   MAX_ATTEMPTS_HISTORY_LIMIT=25
+   
+   # For detailed analysis requirements
+   MAX_ATTEMPTS_HISTORY_LIMIT=100
+   
+   # For development/testing
+   MAX_ATTEMPTS_HISTORY_LIMIT=10
+   ```
+
+4. **Monitoring**:
+   - Monitor API response times
+   - Track database query performance
+   - Set up alerts for failed attempts
+
+### Current Deployment Status
+
+| Platform | Status | URL |
+|----------|--------|-----|
+| **Production** | ✅ Active | [Vercel Deployment](https://vercel.com/tuans-projects-b937be10/python-smart-kids) |
+| **Railway** | ✅ Active | [Railway Deployment](https://pythonsmartkids-production.up.railway.app/docs) |
+| **Database** | ✅ Active | [Neon PostgreSQL](https://console.neon.tech/app/projects/dark-hill-03559036) |
+| **Local Dev** | 🟡 Manual | `http://127.0.0.1:8000/` |
+
+### Frontend Integration
+
+| Platform | Repository | Status |
+|----------|------------|--------|
+| **Android App** | [SmartBoy_Capacitor](https://github.com/tuanapp/SmartBoy_Capacitor) | ✅ Published on Google Play Store |
+| **Local Dev** | `C:\Private\GIT\SmartBoy_Capacitor_2` | 🟡 Development |
 
 
 

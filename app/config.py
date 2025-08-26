@@ -27,5 +27,8 @@ AI_BRIDGE_MODEL = os.getenv("FORGE_AI_MODEL", "Gemini/models/gemini-2.0-flash") 
 HTTP_REFERER = os.getenv("HTTP_REFERER", "https://github.com/tuanna0308/PythonSmartKids")
 APP_TITLE = os.getenv("APP_TITLE", "PythonSmartKids")
 
+# Database query settings
+MAX_ATTEMPTS_HISTORY_LIMIT = int(os.getenv("MAX_ATTEMPTS_HISTORY_LIMIT", "20"))
+
 # Testing settings
 RUN_REAL_API_TESTS = os.getenv("RUN_REAL_API_TESTS", "False").lower() == "true"

@@ -7,6 +7,7 @@ from datetime import datetime
 from app.models.schemas import MathAttempt
 from app.db.db_interface import DatabaseProvider
 from app.db.models import QuestionPattern
+from app.config import MAX_ATTEMPTS_HISTORY_LIMIT
 
 logger = logging.getLogger(__name__)
 
@@ -114,8 +115,8 @@ class NeonProvider(DatabaseProvider):
                 FROM attempts
                 WHERE student_id = %s
                 ORDER BY datetime DESC
-                LIMIT 50
-            """, (student_id,))
+                LIMIT %s
+            """, (student_id, MAX_ATTEMPTS_HISTORY_LIMIT))
             
             data = cursor.fetchall()
             cursor.close()
@@ -130,7 +131,7 @@ class NeonProvider(DatabaseProvider):
                 "uid": item['uid']
             } for item in data]
             
-            logger.debug(f"Retrieved {len(attempts)} attempts for student {student_id}")
+            logger.debug(f"Retrieved {len(attempts)} out of {MAX_ATTEMPTS_HISTORY_LIMIT} max attempts for student {student_id}")
             return attempts
             
         except Exception as e:
@@ -149,8 +150,8 @@ class NeonProvider(DatabaseProvider):
                 FROM attempts
                 WHERE uid = %s
                 ORDER BY datetime DESC
-                LIMIT 50
-            """, (uid,))
+                LIMIT %s
+            """, (uid, MAX_ATTEMPTS_HISTORY_LIMIT))
             
             data = cursor.fetchall()
             cursor.close()
@@ -167,7 +168,7 @@ class NeonProvider(DatabaseProvider):
                 "student_id": item['student_id']
             } for item in data]
             
-            logger.debug(f"Retrieved {len(attempts)} attempts for user with UID {uid}")
+            logger.debug(f"Retrieved {len(attempts)} out of {MAX_ATTEMPTS_HISTORY_LIMIT} max attempts for user with UID {uid}")
             return attempts
             
         except Exception as e:
