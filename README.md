@@ -648,3 +648,9 @@ All project documentation is organized in the [`docs/`](docs/) folder for better
 ### 📖 Quick Access
 
 For comprehensive documentation overview and navigation, see **[`docs/README.md`](docs/README.md)**.
+
+
+TODO
+---
+- max questions to generate needs to be passed as a parameter from client end 
+  - max questoin generation limit must also be sent in backend to prevent throttling.

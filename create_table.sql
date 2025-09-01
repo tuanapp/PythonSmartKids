@@ -6,7 +6,8 @@ CREATE TABLE IF NOT EXISTS public.attempts (
     question TEXT NOT NULL,
     is_answer_correct BOOLEAN NOT NULL,
     incorrect_answer TEXT,
-    correct_answer TEXT NOT NULL
+    correct_answer TEXT NOT NULL,
+    "order" INTEGER
 );
 
 ALTER TABLE public.attempts ENABLE ROW LEVEL SECURITY;
