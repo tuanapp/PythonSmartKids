@@ -124,6 +124,7 @@ def create_question_patterns_table(cursor):
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 type TEXT NOT NULL,
                 pattern_text TEXT NOT NULL,
+                notes TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """)
@@ -163,6 +164,7 @@ def show_manual_instructions():
     print("    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),")
     print("    type TEXT NOT NULL,")
     print("    pattern_text TEXT NOT NULL,")
+    print("    notes TEXT,")
     print("    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()")
     print(");")
     print("```")

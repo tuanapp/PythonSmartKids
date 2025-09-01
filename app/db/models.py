@@ -29,6 +29,7 @@ class QuestionPattern(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     type = Column(String, nullable=False)  # e.g., 'algebra', 'fraction'
     pattern_text = Column(Text, nullable=False)  # e.g., 'a + b = _'
+    notes = Column(Text, nullable=True)  # Special formatting or requirement notes
     created_at = Column(DateTime(timezone=True), nullable=False)
 
 def get_engine():

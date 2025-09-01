@@ -59,6 +59,7 @@ async def get_question_patterns():
                 "id": pattern["id"],
                 "type": pattern["type"],
                 "pattern_text": pattern["pattern_text"],
+                "notes": pattern.get("notes"),
                 "created_at": pattern["created_at"]
             }
             for pattern in patterns

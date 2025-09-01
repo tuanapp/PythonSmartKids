@@ -180,7 +180,10 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
     # Process patterns into a more readable format
     pattern_info = []
     for pattern in patterns:
-        pattern_info.append(f"{pattern['type']}: {pattern['pattern_text']}")
+        pattern_entry = f"{pattern['type']}: {pattern['pattern_text']}"
+        if pattern.get('notes'):
+            pattern_entry += f" (Notes: {pattern['notes']})"
+        pattern_info.append(pattern_entry)
 
     difficulty = 'a & b variables must range from -999 to 999. '    
 
@@ -201,8 +204,9 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
         3. Include similar but slightly different versions of questions they got wrong
         4. Avoid exact repetition of mastered questions
         5. Include at least one question from their strong areas but with increased difficulty
-        6. {difficulty}        Return ONLY a JSON object for each question pattern, with the following format for each question and answer set: 
-        {response_json_format}        7. Generate JSON output only, exclude any text, narrative or notes. Return JSON data without any wrapping text or formatting. return a cleaned and properly formatted JSON"""
+        6. Follow any special formatting requirements mentioned in the pattern notes (e.g., decimal places, units, etc.)
+        7. {difficulty}        Return ONLY a JSON object for each question pattern, with the following format for each question and answer set: 
+        {response_json_format}        8. Generate JSON output only, exclude any text, narrative or notes. Return JSON data without any wrapping text or formatting. return a cleaned and properly formatted JSON"""
     }
     
     logger.debug("Sending prompt to OpenAI")

@@ -185,7 +185,7 @@ class NeonProvider(DatabaseProvider):
 
             # Query to fetch all question patterns
             cursor.execute("""
-                SELECT id, type, pattern_text, created_at
+                SELECT id, type, pattern_text, notes, created_at
                 FROM question_patterns
             """)
 
