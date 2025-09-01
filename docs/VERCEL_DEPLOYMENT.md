@@ -53,16 +53,67 @@ NEON_USER = tuanapp
 NEON_PASSWORD = HdzrNIKh5mM1
 NEON_HOST = ep-sparkling-butterfly-33773987-pooler.ap-southeast-1.aws.neon.tech
 NEON_SSLMODE = require
-OPENAI_API_KEY = your-openai-api-key
+ADMIN_KEY = your-secure-admin-key-for-migrations
+AI_BRIDGE_API_KEY = your-ai-api-key
+AI_BRIDGE_BASE_URL = your-ai-base-url
+AI_BRIDGE_MODEL = your-ai-model
+HTTP_REFERER = your-app-domain
+APP_TITLE = PythonSmartKids
 ```
 
 5. Click "Save" to apply the environment variables
 
-### 5. Redeploy with Environment Variables
+### 5. Run Database Migrations
+
+After deployment, you need to run database migrations. Since Vercel doesn't support traditional Alembic migrations, use the migration API endpoints:
+
+1. **Check migration status:**
+   ```
+   GET https://your-app.vercel.app/admin/migration-status?admin_key=your-secure-admin-key
+   ```
+
+2. **Apply all migrations:**
+   ```
+   POST https://your-app.vercel.app/admin/apply-migrations?admin_key=your-secure-admin-key
+   ```
+
+### 6. Redeploy with Environment Variables
 
 ```bash
 vercel --prod
 ```
+
+## Database Migrations in Vercel
+
+### Why Traditional Migrations Don't Work
+
+Vercel serverless functions have limitations that prevent traditional Alembic migrations:
+- Read-only file system
+- No persistent storage between function calls
+- Cold starts don't run migration scripts
+
+### Migration Solution
+
+The application includes a Vercel-compatible migration system:
+
+1. **Enhanced Database Initialization**: The `init_db()` method now creates all tables with the latest schema
+2. **Migration API Endpoints**: Manual migration triggers via API calls
+3. **Smart Schema Updates**: Detects existing schema and applies only necessary changes
+
+### Available Migration Endpoints
+
+All endpoints require an `admin_key` parameter for security:
+
+- **`GET /admin/migration-status`**: Check current migration status
+- **`POST /admin/apply-migrations`**: Apply all pending migrations  
+- **`POST /admin/add-notes-column`**: Specifically add the notes column
+
+### Example Migration Workflow
+
+1. Deploy to Vercel
+2. Check status: `GET /admin/migration-status?admin_key=YOUR_KEY`
+3. Apply migrations: `POST /admin/apply-migrations?admin_key=YOUR_KEY`
+4. Verify: Check status again to confirm completion
 
 ## Troubleshooting
 

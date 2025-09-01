@@ -44,14 +44,16 @@ class NeonProvider(DatabaseProvider):
     
     def init_db(self) -> None:
         """
-        Initialize the Neon database by creating the attempts table if it doesn't exist.
+        Initialize the Neon database by creating all required tables if they don't exist.
+        This method creates the complete schema including all migration changes.
         """
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             
             logger.info(f"Connected to Neon PostgreSQL at {self.host}")
-              # Create attempts table if it doesn't exist
+            
+            # Create attempts table if it doesn't exist
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS attempts (
                     id SERIAL PRIMARY KEY,
@@ -66,8 +68,63 @@ class NeonProvider(DatabaseProvider):
                 )
             """)
             
+            # Create question_patterns table if it doesn't exist (includes notes and level columns)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS question_patterns (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    type TEXT NOT NULL,
+                    pattern_text TEXT NOT NULL,
+                    notes TEXT,
+                    level INTEGER,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            
+            # Create alembic_version table for migration tracking
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS alembic_version (
+                    version_num VARCHAR(32) NOT NULL,
+                    CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
+                )
+            """)
+            
+            # Check if this is a fresh installation or needs migration updates
+            cursor.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'question_patterns'")
+            patterns_table_existed = cursor.fetchone()[0] > 0
+            
+            if not patterns_table_existed:
+                # Fresh installation - set the migration version to latest
+                cursor.execute("DELETE FROM alembic_version")
+                cursor.execute("INSERT INTO alembic_version (version_num) VALUES ('006')")
+                logger.info("Fresh installation: Set migration version to 006")
+            else:
+                # Existing installation - check if notes and level columns exist
+                cursor.execute("""
+                    SELECT column_name FROM information_schema.columns 
+                    WHERE table_name = 'question_patterns' AND column_name IN ('notes', 'level')
+                """)
+                existing_columns = [row[0] for row in cursor.fetchall()]
+                
+                if 'notes' not in existing_columns:
+                    # Add notes column if it doesn't exist
+                    cursor.execute("ALTER TABLE question_patterns ADD COLUMN notes TEXT")
+                    logger.info("Added notes column to existing question_patterns table")
+                
+                if 'level' not in existing_columns:
+                    # Add level column if it doesn't exist
+                    cursor.execute("ALTER TABLE question_patterns ADD COLUMN level INTEGER")
+                    logger.info("Added level column to existing question_patterns table")
+                
+                # Update migration version if needed
+                cursor.execute("SELECT version_num FROM alembic_version ORDER BY version_num DESC LIMIT 1")
+                current_version = cursor.fetchone()
+                if not current_version or current_version[0] < '006':
+                    cursor.execute("DELETE FROM alembic_version")
+                    cursor.execute("INSERT INTO alembic_version (version_num) VALUES ('006')")
+                    logger.info("Updated migration version to 006")
+            
             conn.commit()
-            logger.info("Successfully initialized Neon database")
+            logger.info("Successfully initialized Neon database with all tables and migrations")
             cursor.close()
             conn.close()
             
@@ -185,7 +242,7 @@ class NeonProvider(DatabaseProvider):
 
             # Query to fetch all question patterns
             cursor.execute("""
-                SELECT id, type, pattern_text, notes, created_at
+                SELECT id, type, pattern_text, notes, level, created_at
                 FROM question_patterns
             """)
 
@@ -196,4 +253,36 @@ class NeonProvider(DatabaseProvider):
             return patterns
         except Exception as e:
             logger.error(f"Error retrieving question patterns: {e}")
+            raise Exception(f"Database error: {e}")
+
+    def get_question_patterns_by_level(self, level: int = None):
+        """Retrieve question patterns filtered by level."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            if level is not None:
+                # Query to fetch patterns with specific level or null level
+                cursor.execute("""
+                    SELECT id, type, pattern_text, notes, level, created_at
+                    FROM question_patterns
+                    WHERE level = %s OR level IS NULL
+                    ORDER BY level ASC
+                """, (level,))
+            else:
+                # Query to fetch all question patterns
+                cursor.execute("""
+                    SELECT id, type, pattern_text, notes, level, created_at
+                    FROM question_patterns
+                    ORDER BY level ASC
+                """)
+
+            patterns = cursor.fetchall()
+            cursor.close()
+            conn.close()
+
+            logger.debug(f"Retrieved {len(patterns)} patterns for level {level}")
+            return patterns
+        except Exception as e:
+            logger.error(f"Error retrieving question patterns by level: {e}")
             raise Exception(f"Database error: {e}")

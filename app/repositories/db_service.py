@@ -53,5 +53,15 @@ def get_question_patterns():
         logger.error(f"Error retrieving question patterns: {e}")
         raise
 
+def get_question_patterns_by_level(level: int = None):
+    """Retrieve question patterns filtered by level using the configured database provider."""
+    try:
+        patterns = db_provider.get_question_patterns_by_level(level)
+        logger.debug(f"Retrieved {len(patterns)} question patterns for level {level}")
+        return patterns
+    except Exception as e:
+        logger.error(f"Error retrieving question patterns by level: {e}")
+        raise
+
 # Initialize the database when this module is imported
 init_db()

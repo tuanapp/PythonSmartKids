@@ -29,3 +29,8 @@ class DatabaseProvider(ABC):
     def get_question_patterns(self) -> List[Dict[str, Any]]:
         """Retrieve all question patterns."""
         pass
+
+    @abstractmethod
+    def get_question_patterns_by_level(self, level: int = None) -> List[Dict[str, Any]]:
+        """Retrieve question patterns filtered by level."""
+        pass

@@ -20,6 +20,7 @@ class QuestionPattern(BaseModel):
 
 class GenerateQuestionsRequest(BaseModel):
     uid: str
+    level: Optional[int] = None  # Filter patterns by difficulty level
     ai_bridge_base_url: Optional[str] = None
     ai_bridge_api_key: Optional[str] = None
     ai_bridge_model: Optional[str] = None

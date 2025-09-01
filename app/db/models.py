@@ -30,6 +30,7 @@ class QuestionPattern(Base):
     type = Column(String, nullable=False)  # e.g., 'algebra', 'fraction'
     pattern_text = Column(Text, nullable=False)  # e.g., 'a + b = _'
     notes = Column(Text, nullable=True)  # Special formatting or requirement notes
+    level = Column(Integer, nullable=True)  # Difficulty level (e.g., 1-10)
     created_at = Column(DateTime(timezone=True), nullable=False)
 
 def get_engine():
