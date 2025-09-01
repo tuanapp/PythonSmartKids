@@ -10,7 +10,7 @@ class MathAttempt(BaseModel):
     is_answer_correct: bool
     incorrect_answer: Optional[str] = None
     correct_answer: str
-    order: Optional[int] = None
+    qorder: Optional[int] = None
 
 class QuestionPattern(BaseModel):
     id: str

@@ -20,7 +20,7 @@ class Attempt(Base):
     is_answer_correct = Column(Boolean, nullable=False)
     incorrect_answer = Column(Text)
     correct_answer = Column(Text, nullable=False)
-    order = Column(Integer, nullable=True)  # Order of questions in a session
+    qorder = Column(Integer, nullable=True)  # Order of questions in a session
 
 class QuestionPattern(Base):
     """SQLAlchemy model for question patterns."""

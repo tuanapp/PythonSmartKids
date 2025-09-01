@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS api.attempts (
     is_answer_correct BOOLEAN NOT NULL,
     incorrect_answer TEXT,
     correct_answer TEXT NOT NULL,
-    "order" INTEGER
+    qorder INTEGER
 );
 
 -- Set up RLS policies for the table

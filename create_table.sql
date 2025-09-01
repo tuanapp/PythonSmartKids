@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS public.attempts (
     is_answer_correct BOOLEAN NOT NULL,
     incorrect_answer TEXT,
     correct_answer TEXT NOT NULL,
-    "order" INTEGER
+    qorder INTEGER
 );
 
 ALTER TABLE public.attempts ENABLE ROW LEVEL SECURITY;

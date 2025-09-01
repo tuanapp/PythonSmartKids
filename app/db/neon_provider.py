@@ -62,7 +62,7 @@ class NeonProvider(DatabaseProvider):
                     is_answer_correct BOOLEAN NOT NULL,
                     incorrect_answer TEXT,
                     correct_answer TEXT NOT NULL,
-                    "order" INTEGER
+                    qorder INTEGER
                 )
             """)
             
@@ -84,7 +84,7 @@ class NeonProvider(DatabaseProvider):
             # Insert the attempt
             cursor.execute("""
                 INSERT INTO attempts 
-                (student_id, uid, datetime, question, is_answer_correct, incorrect_answer, correct_answer, "order")
+                (student_id, uid, datetime, question, is_answer_correct, incorrect_answer, correct_answer, qorder)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 attempt.student_id,
@@ -94,7 +94,7 @@ class NeonProvider(DatabaseProvider):
                 attempt.is_answer_correct,
                 attempt.incorrect_answer or "",
                 attempt.correct_answer,
-                attempt.order
+                attempt.qorder
             ))
             
             conn.commit()
@@ -113,10 +113,10 @@ class NeonProvider(DatabaseProvider):
             cursor = conn.cursor(cursor_factory=RealDictCursor)
               # Query for attempts by student_id
             cursor.execute("""
-                SELECT question, is_answer_correct, incorrect_answer, correct_answer, datetime, uid, "order"
+                SELECT question, is_answer_correct, incorrect_answer, correct_answer, datetime, uid, qorder
                 FROM attempts
                 WHERE student_id = %s
-                ORDER BY datetime DESC, "order" ASC
+                ORDER BY datetime DESC, qorder ASC
                 LIMIT %s
             """, (student_id, MAX_ATTEMPTS_HISTORY_LIMIT))
             
@@ -148,10 +148,10 @@ class NeonProvider(DatabaseProvider):
             
             # Query for attempts by uid
             cursor.execute("""
-                SELECT question, is_answer_correct, incorrect_answer, correct_answer, datetime, uid, student_id, "order"
+                SELECT question, is_answer_correct, incorrect_answer, correct_answer, datetime, uid, student_id, qorder
                 FROM attempts
                 WHERE uid = %s
-                ORDER BY datetime DESC, "order" ASC
+                ORDER BY datetime DESC, qorder ASC
                 LIMIT %s
             """, (uid, MAX_ATTEMPTS_HISTORY_LIMIT))
             
