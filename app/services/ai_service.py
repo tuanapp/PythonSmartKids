@@ -103,7 +103,7 @@ def analyze_attempts(attempts):
     
     return weak_areas, number_ranges
 
-def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_bridge_api_key=None, ai_bridge_model=None):
+def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_bridge_api_key=None, ai_bridge_model=None, level=None):
     """
     Generate questions using AI, focusing on student's weak areas based on their attempt history.
     """
@@ -138,7 +138,7 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
     logger.debug(f"Found {len(weak_areas)} weak areas and {len(strong_areas)} strong areas")    # If no valid attempts, use fallback questions
     if not valid_attempts:
         logger.debug("No valid attempts found, using fallback questions")
-        return generate_fallback_questions("No valid attempts found", attempts=attempts)
+        return generate_fallback_questions("No valid attempts found", attempts=attempts, level=level)
 
     # Create example JSON separately to avoid f-string issues
     response_json_format = '''
@@ -181,8 +181,8 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
     pattern_info = []
     for pattern in patterns:
         pattern_entry = f"{pattern['type']}: {pattern['pattern_text']}"
-        if pattern.get('level'):
-            pattern_entry += f" [Level {pattern['level']}]"
+        # if pattern.get('level'):
+        #     pattern_entry += f" [Level {pattern['level']}]"
         if pattern.get('notes'):
             pattern_entry += f" (Notes: {pattern['notes']})"
         pattern_info.append(pattern_entry)
@@ -289,7 +289,8 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
                     'errors_count': len(validation_result['errors']),
                     'warnings_count': len(validation_result['warnings']),
                     'ai_model': model,
-                    'historical_records': f"{len(attempts)} db attempts used out of {MAX_ATTEMPTS_HISTORY_LIMIT} max"
+                    'historical_records': f"{len(attempts)} db attempts used out of {MAX_ATTEMPTS_HISTORY_LIMIT} max",
+                    'level': level
                 }
             }
         else:
@@ -299,13 +300,15 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
                 f"Validation failed: {'; '.join(validation_result['errors'][:3])}", 
                 current_response_text, 
                 response_time,
-                attempts
+                attempts,
+                level
             )
             fallback_result['validation_result'] = {
                 'is_valid': False,
                 'original_errors': validation_result['errors'],
                 'original_warnings': validation_result['warnings'],
-                'historical_records': f"{len(attempts)} db attempts used out of {MAX_ATTEMPTS_HISTORY_LIMIT} max"
+                'historical_records': f"{len(attempts)} db attempts used out of {MAX_ATTEMPTS_HISTORY_LIMIT} max",
+                'level': level
             }
             return fallback_result
     except json.JSONDecodeError as je:
@@ -316,7 +319,7 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
         
         logger.error(f"JSON decode error: {str(je)}")
         logger.error(f"AI Bridge API response time: {response_time:.2f} seconds")
-        return generate_fallback_questions(str(je), current_response_text, response_time, attempts)
+        return generate_fallback_questions(str(je), current_response_text, response_time, attempts, level)
     except Exception as e:
         # Calculate response time even on error
         if response_time is None:
@@ -329,9 +332,9 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
         model = ai_bridge_model or AI_BRIDGE_MODEL
         logger.error(f"ai client info : {model} {api_key} {base_url}")
         logger.error(f"AI Bridge API response time: {response_time:.2f} seconds")
-        return generate_fallback_questions(str(e), current_response_text, response_time, attempts)
+        return generate_fallback_questions(str(e), current_response_text, response_time, attempts, level)
 
-def generate_fallback_questions(error_message="Unknown error occurred", current_response_text="", response_time=None, attempts=None):
+def generate_fallback_questions(error_message="Unknown error occurred", current_response_text="", response_time=None, attempts=None, level=None):
     """Generate basic questions as a fallback if AI fails"""
     fallback_questions = [
         {
@@ -402,8 +405,10 @@ def generate_fallback_questions(error_message="Unknown error occurred", current_
     if attempts is not None:
         result['validation_result'] = {
             'is_valid': False,
-            'historical_records': f"{len(attempts)} db attempts used out of {MAX_ATTEMPTS_HISTORY_LIMIT} max"
+            'historical_records': f"{len(attempts)} db attempts used out of {MAX_ATTEMPTS_HISTORY_LIMIT} max",
+            'level': level
         }
     
     return result
 
+#test
