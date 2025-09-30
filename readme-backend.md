@@ -7,9 +7,13 @@ PythonSmartKids
 This project provides an API for tracking kids' math learning progress and using AI to suggest personalized questions.
 
 ## Features
-- Submit math question attempts.
-- Store attempts in a database.
+- Submit math question attempts with question ordering support.
+- Store attempts in a PostgreSQL database (Neon cloud hosting).
 - Use AI to analyze performance and suggest practice questions.
+- Question pattern management with difficulty level support.
+- Database migration system for schema updates.
+- Comprehensive testing framework with multiple test categories.
+- Admin endpoints for database management.
 
 ## Setup
 
@@ -63,7 +67,16 @@ This project provides an API for tracking kids' math learning progress and using
     | `POST` | `/submit_attempt` | Submit a student's math question attempt for storage |
     | `GET` | `/analyze_student/{uid}` | Get AI-powered analysis for student's weak areas |
     | `POST` | `/generate-questions` | Generate personalized practice questions |
-    | `GET` | `/question-patterns` | Retrieve all available question patterns |
+    | `GET` | `/question-patterns` | Retrieve all available question patterns (with optional level filtering) |
+    
+    ### Admin Endpoints (Authentication Required)
+
+    | Method | Endpoint | Description |
+    |--------|----------|-------------|
+    | `GET` | `/admin/migration-status` | Check database migration status |
+    | `POST` | `/admin/apply-migrations` | Apply all pending database migrations |
+    | `POST` | `/admin/add-notes-column` | Add notes column to question_patterns table |
+    | `POST` | `/admin/add-level-column` | Add level column to question_patterns table |
 
     ### Endpoint Details
 
@@ -75,11 +88,12 @@ This project provides an API for tracking kids' math learning progress and using
     {
         "student_id": 123,
         "uid": "firebase-user-uid",
-        "datetime": "2025-08-26T10:30:00",
+        "datetime": "2025-09-30T10:30:00",
         "question": "What is 2 + 3?",
         "is_answer_correct": true,
         "incorrect_answer": null,
-        "correct_answer": "5"
+        "correct_answer": "5",
+        "qorder": 1
     }
     ```
 
@@ -95,6 +109,7 @@ This project provides an API for tracking kids' math learning progress and using
     ```json
     {
         "uid": "firebase-user-uid",
+        "level": 1,
         "ai_bridge_base_url": "optional-custom-url",
         "ai_bridge_api_key": "optional-custom-key",
         "ai_bridge_model": "optional-custom-model"
@@ -104,56 +119,78 @@ This project provides an API for tracking kids' math learning progress and using
     #### `GET /question-patterns`
     Retrieve all available question patterns for question generation.
     
-    **Response**: Array of question patterns with type and pattern text
+    **Query Parameters**:
+    - `level` (optional): Filter patterns by difficulty level (integer)
+    
+    **Response**: Array of question patterns with id, type, pattern_text, notes, level, and created_at
+
+    #### Admin Endpoints (Authentication Required)
+    
+    All admin endpoints require an `admin_key` parameter for authentication.
+    
+    #### `GET /admin/migration-status`
+    Check the current database migration status.
+    
+    #### `POST /admin/apply-migrations`
+    Apply all pending database migrations.
+    
+    #### `POST /admin/add-notes-column`
+    Add the notes column to the question_patterns table.
+    
+    #### `POST /admin/add-level-column`
+    Add the level column to the question_patterns table.
 
     ### Interactive Documentation
     - **Swagger UI**: Available at `http://127.0.0.1:8000/docs` when running locally
     - **ReDoc**: Available at `http://127.0.0.1:8000/redoc` for alternative documentation view
 
 
-Project Structure
+## Project Structure
+
 ```
-my_project/
-│── src/                     # Source code lives here
-│   ├── main.py              # Entry point of the application
-│   ├── config.py            # Configuration settings
-│   ├── app/                 # Core application logic
+Backend_Python/
+├── app/                     # Main application directory
+│   ├── main.py             # FastAPI application entry point
+│   ├── config.py           # Configuration settings
+│   ├── api/                # API layer
+│   │   └── routes.py       # API endpoints and routing
+│   ├── db/                 # Database layer
 │   │   ├── __init__.py
-│   │   ├── services/        # Business logic layer
-│   │   │   ├── __init__.py
-│   │   │   ├── user_service.py
-│   │   │   ├── order_service.py
-│   │   ├── models/          # Data models (SQLAlchemy, Pydantic, etc.)
-│   │   │   ├── __init__.py
-│   │   │   ├── user.py
-│   │   │   ├── order.py
-│   │   ├── repositories/    # Data access layer (Repository Pattern)
-│   │   │   ├── __init__.py
-│   │   │   ├── user_repo.py
-│   │   │   ├── order_repo.py
-│   │   ├── routes/          # API Routes / Controllers
-│   │   │   ├── __init__.py
-│   │   │   ├── user_routes.py
-│   │   │   ├── order_routes.py
-│   ├── utils/               # Utility functions and helpers
-│   │   ├── __init__.py
-│   │   ├── logger.py
-│   │   ├── validators.py
-│   ├── db/                  # Database setup and migrations
-│   │   ├── __init__.py
-│   │   ├── db_session.py
-│── tests/                   # Unit and integration tests
-│   ├── __init__.py
-│   ├── test_user.py
-│   ├── test_order.py
-│── scripts/                 # Deployment and automation scripts
-│   ├── setup_db.py
-│   ├── run_server.py
-│── .env                     # Environment variables 
-│── requirements.txt         # Python dependencies
-│── Dockerfile               # Docker configuration
-│── .gitignore               # Ignore files for Git
-│── README.md                # Project documentation
+│   │   ├── db_factory.py   # Database factory pattern
+│   │   ├── db_init.py      # Database initialization
+│   │   ├── db_interface.py # Database interfaces
+│   │   ├── models.py       # SQLAlchemy models
+│   │   ├── neon_provider.py # Neon PostgreSQL provider
+│   │   └── vercel_migrations.py # Database migrations
+│   ├── models/             # Pydantic models/schemas
+│   │   └── schemas.py      # API request/response schemas
+│   ├── repositories/       # Data access layer
+│   │   └── db_service.py   # Database service operations
+│   ├── services/           # Business logic layer
+│   │   └── ai_service.py   # AI/ML service integration
+│   ├── utils/              # Utility functions
+│   │   └── logger.py       # Logging utilities
+│   └── validators/         # Input validation
+│       └── response_validator.py
+├── tests/                  # Test suites
+│   ├── unit/              # Unit tests
+│   ├── integration/       # Integration tests
+│   ├── e2e/              # End-to-end tests
+│   ├── real/             # Real API tests
+│   ├── manual/           # Manual test scripts
+│   ├── fixtures/         # Test data and fixtures
+│   ├── conftest.py       # Pytest configuration
+│   └── pytest_fixtures.py # Shared test fixtures
+├── docs/                  # Documentation
+├── migrations/            # Alembic database migrations
+├── client/               # Simple HTML client for testing
+├── Scripts/              # Virtual environment scripts
+├── .env                  # Environment variables
+├── requirements.txt      # Python dependencies
+├── Dockerfile           # Docker configuration
+├── vercel.json          # Vercel deployment config
+├── pytest.ini          # Pytest configuration
+└── README.md            # Project documentation
 ```
 
 
@@ -202,6 +239,7 @@ The application uses environment variables for configuration management. These c
 |----------|---------|-------------|
 | `HTTP_REFERER` | `https://github.com/tuanna0308/PythonSmartKids` | HTTP referer for API requests |
 | `APP_TITLE` | `PythonSmartKids` | Application title |
+| `ADMIN_KEY` | `dev-admin-key` | Admin authentication key for migration endpoints |
 
 ### Testing Configuration
 
@@ -291,23 +329,7 @@ The system ensures **scalability, modularity, and clean architecture**, making i
 
 ---
 
-### **Project Folder Structure**
-"The project is organized as follows:  
 
-- **`src/`** – Contains all source code files.  
-  - **`api/`** – The main API implementation.  
-    - `main.py` – Entry point for the FastAPI-based application.  
-    - `routes/` – Defines the API endpoints.  
-  - **`services/`** – Business logic handling.  
-  - **`models/`** – Defines the data models used for database interactions.  
-  - **`database/`** – Handles database connection and queries.  
-  - **`ai/`** – Responsible for AI-powered analysis using Qwen API.  
-  - **`utils/`** – Utility functions for common tasks.  
-- **`tests/`** – Includes unit and integration tests for API validation.  
-- **`config/`** – Stores configuration files, including API keys and database settings.  
-- **`docs/`** – Documentation for API usage and deployment.  
-
-This structure ensures that our code is **modular, testable, and easy to scale**."
 
 ---
 
@@ -320,12 +342,13 @@ This structure ensures that our code is **modular, testable, and easy to scale**
 - Question  
 - Whether the answer is correct or not  
 - The incorrect answer (if any)  
-- The correct answer  
+- The correct answer
+- Question order (for tracking question sequence)
 
-This data is stored in our database for further analysis."
+This data is stored in our PostgreSQL database for further analysis."
 
 #### **Step 2: AI Analysis and Personalized Question Generation**
-"When a teacher or system requests an analysis for a student, the API fetches all recorded responses and sends them to the **Qwen AI model**. The AI analyzes performance trends and identifies weak areas. Based on this, it generates a new set of personalized math questions to help the student improve in those areas."
+"When a teacher or system requests an analysis for a student, the API fetches all recorded responses and sends them to the **AI model** (configurable - supports Gemini, Qwen, and other models). The AI analyzes performance trends and identifies weak areas. Based on this, it generates a new set of personalized math questions to help the student improve in those areas."
 
 #### **Step 3: Continuous Improvement**
 "Since all student interactions are logged, the system continuously refines its question recommendations, creating a **personalized learning journey** for each student."
@@ -335,9 +358,11 @@ This data is stored in our database for further analysis."
 ### **Key Technologies Used**
 "This project is built using:  
 - **FastAPI** – A modern and high-performance web framework.  
-- **Qwen AI API** – For AI-powered student performance analysis.  
-- **Pytest** – For automated testing.  
+- **AI Models** – Supports multiple AI providers (Gemini, Qwen, OpenAI) for student performance analysis.  
+- **PostgreSQL (Neon)** – Cloud-hosted database for data persistence.
+- **Pytest** – Comprehensive testing framework with organized test categories.  
 - **Docker** – For containerized deployment.  
+- **Alembic** – Database migration management.
 
 All API endpoints are well-documented using **Swagger**, ensuring ease of integration with front-end applications."
 
