@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any
-from app.models.schemas import MathAttempt
+from app.models.schemas import MathAttempt, UserRegistration
 
 class DatabaseProvider(ABC):
     """Abstract base class for database providers."""
@@ -8,6 +8,11 @@ class DatabaseProvider(ABC):
     @abstractmethod
     def init_db(self) -> None:
         """Initialize the database and create necessary tables if they don't exist."""
+        pass
+    
+    @abstractmethod
+    def save_user_registration(self, user: UserRegistration) -> None:
+        """Save a user registration to the database."""
         pass
     
     @abstractmethod
@@ -33,4 +38,14 @@ class DatabaseProvider(ABC):
     @abstractmethod
     def get_question_patterns_by_level(self, level: int = None) -> List[Dict[str, Any]]:
         """Retrieve question patterns filtered by level."""
+        pass
+
+    @abstractmethod
+    def get_user_by_uid(self, uid: str) -> Dict[str, Any]:
+        """Retrieve user registration data by UID."""
+        pass
+
+    @abstractmethod
+    def get_user_by_email(self, email: str) -> Dict[str, Any]:
+        """Retrieve user registration data by email."""
         pass

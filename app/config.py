@@ -1,17 +1,24 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load environment-specific configuration
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
-# Database settings
-DATABASE_PROVIDER = os.getenv("DATABASE_PROVIDER", "neon")  # Only 'neon' is supported now
+if ENVIRONMENT == "development":
+    load_dotenv(".env.development")
+elif ENVIRONMENT == "production":
+    load_dotenv(".env.production")
+else:
+    load_dotenv()  # Fallback to default .env
+
+# Database settings - PostgreSQL only
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://smartboy_dev:smartboy_dev@localhost:5432/smartboy_dev")
 
 # Neon PostgreSQL specific settings
-DATABASE_URL = os.getenv("DATABASE_URL", "")
 NEON_DBNAME = os.getenv("NEON_DBNAME", "smartboydb")
 NEON_USER = os.getenv("NEON_USER", "tuanapp")
-NEON_PASSWORD = os.getenv("NEON_PASSWORD", "HdzrNIKh5mM1")
-NEON_HOST = os.getenv("NEON_HOST", "ep-sparkling-butterfly-33773987-pooler.ap-southeast-1.aws.neon.tech")
+NEON_PASSWORD = os.getenv("NEON_PASSWORD", "")
+NEON_HOST = os.getenv("NEON_HOST", "localhost")
 NEON_SSLMODE = os.getenv("NEON_SSLMODE", "require")
 
 # OpenAI settings

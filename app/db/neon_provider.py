@@ -4,9 +4,10 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from datetime import datetime
 
-from app.models.schemas import MathAttempt
+from app.models.schemas import MathAttempt, UserRegistration
 from app.db.db_interface import DatabaseProvider
 from app.db.models import QuestionPattern
+from app.db.db_initializer import DatabaseInitializer
 from app.config import MAX_ATTEMPTS_HISTORY_LIMIT
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,25 @@ class NeonProvider(DatabaseProvider):
         self.host = host
         self.sslmode = sslmode
         self.table_name = 'attempts'
+        
+        # For local PostgreSQL (localhost), try to ensure database exists
+        if host == 'localhost':
+            connection_params = {
+                'dbname': dbname,
+                'user': user,
+                'password': password,
+                'host': host,
+                'sslmode': sslmode
+            }
+            
+            try:
+                success = DatabaseInitializer.ensure_postgres_database_exists(connection_params)
+                if success:
+                    logger.info(f"Database '{dbname}' is ready for use")
+                else:
+                    logger.warning(f"Could not auto-create database '{dbname}'. Manual setup may be required.")
+            except Exception as e:
+                logger.warning(f"Database auto-creation failed: {e}. Will attempt to connect anyway.")
     
     def _get_connection(self):
         """Create and return a new database connection."""
@@ -77,6 +97,21 @@ class NeonProvider(DatabaseProvider):
                     notes TEXT,
                     level INTEGER,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            
+            # Create users table if it doesn't exist
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    uid TEXT UNIQUE NOT NULL,
+                    email TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    grade_level INTEGER NOT NULL,
+                    registration_date TIMESTAMPTZ NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
             """)
             
@@ -131,6 +166,44 @@ class NeonProvider(DatabaseProvider):
         except Exception as e:
             logger.error(f"Failed to initialize Neon database: {e}")
             raise Exception(f"Database initialization error: {e}")
+    
+    def save_user_registration(self, user: UserRegistration) -> None:
+        """Save a user registration to the Neon database."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Convert ISO string to datetime object
+            registration_date = datetime.fromisoformat(user.registrationDate.replace('Z', '+00:00'))
+            
+            # Insert or update the user registration
+            cursor.execute("""
+                INSERT INTO users (uid, email, name, display_name, grade_level, registration_date, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (uid) 
+                DO UPDATE SET 
+                    email = EXCLUDED.email,
+                    name = EXCLUDED.name,
+                    display_name = EXCLUDED.display_name,
+                    grade_level = EXCLUDED.grade_level,
+                    updated_at = NOW()
+            """, (
+                user.uid,
+                user.email,
+                user.name,
+                user.displayName,
+                user.gradeLevel,
+                registration_date
+            ))
+            
+            conn.commit()
+            logger.debug(f"User registration saved for uid: {user.uid}")
+            cursor.close()
+            conn.close()
+            
+        except Exception as e:
+            logger.error(f"Error saving user registration to Neon: {e}")
+            raise Exception(f"Database error: {e}")
         
     def save_attempt(self, attempt: MathAttempt) -> None:
         """Save a math attempt to the Neon database."""
@@ -285,4 +358,58 @@ class NeonProvider(DatabaseProvider):
             return patterns
         except Exception as e:
             logger.error(f"Error retrieving question patterns by level: {e}")
+            raise Exception(f"Database error: {e}")
+
+    def get_user_by_uid(self, uid: str) -> Dict[str, Any]:
+        """Retrieve user registration data by UID."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            cursor.execute("""
+                SELECT uid, email, name, display_name, grade_level, registration_date, updated_at
+                FROM users
+                WHERE uid = %s
+            """, (uid,))
+            
+            user = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if user:
+                logger.debug(f"Retrieved user data for uid: {uid}")
+                return dict(user)
+            else:
+                logger.debug(f"No user found for uid: {uid}")
+                return {}
+                
+        except Exception as e:
+            logger.error(f"Error retrieving user by uid: {e}")
+            raise Exception(f"Database error: {e}")
+
+    def get_user_by_email(self, email: str) -> Dict[str, Any]:
+        """Retrieve user registration data by email."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            cursor.execute("""
+                SELECT uid, email, name, display_name, grade_level, registration_date, updated_at
+                FROM users
+                WHERE email = %s
+            """, (email,))
+            
+            user = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if user:
+                logger.debug(f"Retrieved user data for email: {email}")
+                return dict(user)
+            else:
+                logger.debug(f"No user found for email: {email}")
+                return {}
+                
+        except Exception as e:
+            logger.error(f"Error retrieving user by email: {e}")
             raise Exception(f"Database error: {e}")

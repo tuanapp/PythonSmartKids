@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from app.models.schemas import MathAttempt, GenerateQuestionsRequest
+from app.models.schemas import MathAttempt, GenerateQuestionsRequest, UserRegistration
 from app.services import ai_service
 from app.services.ai_service import generate_practice_questions
 from app.repositories import db_service
@@ -11,6 +11,24 @@ import os
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+@router.post("/users/register")
+async def register_user(user: UserRegistration):
+    """Register a new user in the backend database"""
+    try:
+        # Save user registration to database
+        result = db_service.save_user_registration(user)
+        logger.debug(f"User registration saved for uid: {user.uid}")
+        return {
+            "message": "User registered successfully",
+            "uid": user.uid,
+            "email": user.email,
+            "name": user.name,
+            "registrationDate": user.registrationDate
+        }
+    except Exception as e:
+        logger.error(f"Error registering user: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to register user: {str(e)}")
 
 @router.post("/submit_attempt")
 async def submit_attempt(attempt: MathAttempt):

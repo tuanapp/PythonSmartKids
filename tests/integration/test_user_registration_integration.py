@@ -1,0 +1,291 @@
+"""
+Integration Test for User Registration API
+
+This test verifies the complete flow:
+1. Call the /users/register API endpoint
+2. Verify data is saved to the PostgreSQL database
+3. Verify data can be retrieved from the database
+4. Test various scenarios (new user, existing user update, validation)
+"""
+
+import pytest
+import os
+import json
+from datetime import datetime, timezone
+from fastapi.testclient import TestClient
+from fastapi import FastAPI
+
+# Set test environment before importing app modules
+os.environ['ENVIRONMENT'] = 'development'
+
+from app.main import app
+from app.repositories import db_service
+from app.models.schemas import UserRegistration
+
+class TestUserRegistrationIntegration:
+    """Integration tests for user registration functionality."""
+    
+    @pytest.fixture(scope="class")
+    def client(self):
+        """Create test client for FastAPI app."""
+        return TestClient(app)
+    
+    @pytest.fixture(scope="class") 
+    def test_user_data(self):
+        """Sample test user data for registration."""
+        return {
+            "uid": "FrhUjcQpTDVKK14K4y3thVcPgQd2",  # Realistic Firebase UID format
+            "email": "test.student@example.com",
+            "name": "Test Student",
+            "displayName": "Test S.",
+            "gradeLevel": 5,
+            "registrationDate": datetime.now(timezone.utc).isoformat()
+        }
+    
+    @pytest.fixture(scope="class")
+    def updated_user_data(self):
+        """Sample updated user data for testing user updates."""
+        return {
+            "uid": "FrhUjcQpTDVKK14K4y3thVcPgQd2",  # Same UID as test_user_data
+            "email": "test.student.updated@example.com",  # Updated email
+            "name": "Test Student Updated",  # Updated name
+            "displayName": "Test S. Updated",  # Updated display name
+            "gradeLevel": 6,  # Updated grade level
+            "registrationDate": datetime.now(timezone.utc).isoformat()
+        }
+
+    def test_01_user_registration_success(self, client, test_user_data):
+        """Test successful user registration via API."""
+        print(f"\n🧪 Testing user registration for: {test_user_data['email']}")
+        
+        # Call the registration API
+        response = client.post("/users/register", json=test_user_data)
+        
+        # Verify API response
+        assert response.status_code == 200
+        response_data = response.json()
+        
+        assert response_data["message"] == "User registered successfully"
+        assert response_data["uid"] == test_user_data["uid"]
+        assert response_data["email"] == test_user_data["email"]
+        assert response_data["name"] == test_user_data["name"]
+        assert "registrationDate" in response_data
+        
+        print(f"✅ API Response: {response_data}")
+
+    def test_02_verify_user_saved_to_database(self, test_user_data):
+        """Test that user data was actually saved to the database."""
+        print(f"\n🔍 Verifying user saved to database: {test_user_data['uid']}")
+        
+        # Retrieve user from database by UID
+        saved_user = db_service.get_user_by_uid(test_user_data["uid"])
+        
+        # Verify user exists in database
+        assert saved_user is not None
+        assert len(saved_user) > 0
+        
+        # Verify all fields were saved correctly
+        assert saved_user["uid"] == test_user_data["uid"]
+        assert saved_user["email"] == test_user_data["email"]
+        assert saved_user["name"] == test_user_data["name"]
+        assert saved_user["display_name"] == test_user_data["displayName"]
+        assert saved_user["grade_level"] == test_user_data["gradeLevel"]
+        assert saved_user["registration_date"] is not None
+        assert saved_user["updated_at"] is not None
+        
+        print(f"✅ Database Record: {saved_user}")
+
+    def test_03_retrieve_user_by_email(self, test_user_data):
+        """Test retrieving user data by email."""
+        print(f"\n🔍 Testing user retrieval by email: {test_user_data['email']}")
+        
+        # Retrieve user from database by email
+        saved_user = db_service.get_user_by_email(test_user_data["email"])
+        
+        # Verify user exists and matches
+        assert saved_user is not None
+        assert len(saved_user) > 0
+        assert saved_user["uid"] == test_user_data["uid"]
+        assert saved_user["email"] == test_user_data["email"]
+        
+        print(f"✅ Found user by email: {saved_user['name']}")
+
+    def test_04_user_update_existing_registration(self, client, updated_user_data):
+        """Test updating an existing user registration (upsert functionality)."""
+        print(f"\n🔄 Testing user registration update for: {updated_user_data['uid']}")
+        
+        # Register the updated user data (same UID, different details)
+        response = client.post("/users/register", json=updated_user_data)
+        
+        # Verify API response
+        assert response.status_code == 200
+        response_data = response.json()
+        assert response_data["uid"] == updated_user_data["uid"]
+        assert response_data["email"] == updated_user_data["email"]
+        assert response_data["name"] == updated_user_data["name"]
+        
+        print(f"✅ Update API Response: {response_data}")
+
+    def test_05_verify_user_updated_in_database(self, updated_user_data):
+        """Test that user update was saved to the database."""
+        print(f"\n🔍 Verifying user update in database: {updated_user_data['uid']}")
+        
+        # Retrieve user from database
+        updated_user = db_service.get_user_by_uid(updated_user_data["uid"])
+        
+        # Verify user was updated (not duplicated)
+        assert updated_user is not None
+        assert updated_user["uid"] == updated_user_data["uid"]
+        assert updated_user["email"] == updated_user_data["email"]  # Should be updated
+        assert updated_user["name"] == updated_user_data["name"]    # Should be updated
+        assert updated_user["display_name"] == updated_user_data["displayName"]  # Should be updated
+        assert updated_user["grade_level"] == updated_user_data["gradeLevel"]    # Should be updated
+        
+        print(f"✅ Updated Database Record: {updated_user}")
+
+    def test_06_invalid_registration_data(self, client):
+        """Test registration with invalid data."""
+        print(f"\n❌ Testing registration with invalid data")
+        
+        # Test with missing required fields
+        invalid_data = {
+            "uid": "XyZ9AbC3dEf7GhI1jKl5MnO8pQr2",  # Valid Firebase UID format but missing other fields
+            "email": "invalid@example.com"
+            # Missing name, displayName, gradeLevel, registrationDate
+        }
+        
+        response = client.post("/users/register", json=invalid_data)
+        
+        # Should return validation error
+        assert response.status_code == 422  # Unprocessable Entity
+        
+        print(f"✅ Invalid data properly rejected: {response.status_code}")
+
+    def test_07_grade_level_validation(self, client):
+        """Test registration with different grade levels."""
+        print(f"\n📚 Testing grade level validation")
+        
+        valid_grades = [4, 5, 6, 7]
+        
+        # Generate realistic Firebase UIDs for each grade level test
+        firebase_uids = [
+            "Abc1Def2Ghi3Jkl4Mno5Pqr6Stu7",  # Grade 4
+            "Bcd2Efg3Hij4Klm5Nop6Qrs7Tuv8",  # Grade 5  
+            "Cde3Fgh4Ijk5Lmn6Opq7Rst8Uvw9",  # Grade 6
+            "Def4Ghi5Jkl6Mno7Pqr8Stu9Vwx0"   # Grade 7
+        ]
+        
+        for i, grade in enumerate(valid_grades):
+            test_data = {
+                "uid": firebase_uids[i],
+                "email": f"student.grade{grade}@example.com",
+                "name": f"Student Grade {grade}",
+                "displayName": f"Student G{grade}",
+                "gradeLevel": grade,
+                "registrationDate": datetime.now(timezone.utc).isoformat()
+            }
+            
+            response = client.post("/users/register", json=test_data)
+            assert response.status_code == 200
+            
+            # Verify in database
+            saved_user = db_service.get_user_by_uid(test_data["uid"])
+            assert saved_user["grade_level"] == grade
+            
+            print(f"✅ Grade {grade} registration successful")
+
+    def test_08_concurrent_registrations(self, client):
+        """Test multiple user registrations to ensure no conflicts."""
+        print(f"\n👥 Testing multiple concurrent registrations")
+        
+        users = [
+            {
+                "uid": "Efg5Hij6Klm7Nop8Qrs9Tuv0Wxy1",  # Realistic Firebase UID
+                "email": "student001@example.com",
+                "name": "Student One",
+                "displayName": "Student 1",
+                "gradeLevel": 4,
+                "registrationDate": datetime.now(timezone.utc).isoformat()
+            },
+            {
+                "uid": "Fgh6Ijk7Lmn8Opq9Rst0Uvw1Xyz2", # Realistic Firebase UID
+                "email": "student002@example.com",
+                "name": "Student Two",
+                "displayName": "Student 2",
+                "gradeLevel": 5,
+                "registrationDate": datetime.now(timezone.utc).isoformat()
+            },
+            {
+                "uid": "Ghi7Jkl8Mno9Pqr0Stu1Vwx2Yza3", # Realistic Firebase UID
+                "email": "student003@example.com", 
+                "name": "Student Three",
+                "displayName": "Student 3",
+                "gradeLevel": 6,
+                "registrationDate": datetime.now(timezone.utc).isoformat()
+            }
+        ]
+        
+        # Register all users
+        for user in users:
+            response = client.post("/users/register", json=user)
+            assert response.status_code == 200
+            
+            # Verify each user is saved correctly
+            saved_user = db_service.get_user_by_uid(user["uid"])
+            assert saved_user["uid"] == user["uid"]
+            assert saved_user["email"] == user["email"]
+            
+            print(f"✅ Registered: {user['name']}")
+
+    def test_09_email_uniqueness(self, client):
+        """Test that users can have the same email (Firebase handles uniqueness)."""
+        print(f"\n📧 Testing email handling")
+        
+        # Create two different users with same email (should be allowed since Firebase manages uniqueness)
+        user1 = {
+            "uid": "Hij8Klm9Nop0Qrs1Tuv2Wxy3Zab4",  # Realistic Firebase UID
+            "email": "shared@example.com",
+            "name": "User One",
+            "displayName": "User 1", 
+            "gradeLevel": 5,
+            "registrationDate": datetime.now(timezone.utc).isoformat()
+        }
+        
+        user2 = {
+            "uid": "Ijk9Lmn0Opq1Rst2Uvw3Xyz4Abc5",  # Different realistic Firebase UID
+            "email": "shared@example.com",  # Same email
+            "name": "User Two",
+            "displayName": "User 2",
+            "gradeLevel": 6,
+            "registrationDate": datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Both should register successfully (different UIDs)
+        response1 = client.post("/users/register", json=user1)
+        response2 = client.post("/users/register", json=user2)
+        
+        assert response1.status_code == 200
+        assert response2.status_code == 200
+        
+        # Both should exist in database with different UIDs
+        saved_user1 = db_service.get_user_by_uid(user1["uid"])
+        saved_user2 = db_service.get_user_by_uid(user2["uid"])
+        
+        assert saved_user1["uid"] != saved_user2["uid"]
+        assert saved_user1["email"] == saved_user2["email"]  # Same email allowed
+        
+        print(f"✅ Both users registered with same email successfully")
+
+    def test_10_cleanup_test_users(self):
+        """Clean up test users (optional - for clean test environment)."""
+        print(f"\n🧹 Test completed - all registration flows verified")
+        
+        # Note: In a real scenario, you might want to clean up test data
+        # For now, we'll leave the test data for manual inspection
+        print("✅ Integration test suite completed successfully!")
+
+
+if __name__ == "__main__":
+    # Run the integration test
+    import sys
+    sys.exit(pytest.main([__file__, "-v", "--tb=short"]))

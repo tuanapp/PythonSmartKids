@@ -1,6 +1,6 @@
 import logging
 from app.db.models import QuestionPattern
-from app.models.schemas import MathAttempt
+from app.models.schemas import MathAttempt, UserRegistration
 from app.db.db_factory import DatabaseFactory
 
 logger = logging.getLogger(__name__)
@@ -11,6 +11,16 @@ db_provider = DatabaseFactory.get_provider()
 def init_db():
     """Initialize the configured database."""
     db_provider.init_db()
+
+def save_user_registration(user: UserRegistration):
+    """Save a user registration using the configured database provider."""
+    try:
+        db_provider.save_user_registration(user)
+        logger.debug(f"User registration saved for uid: {user.uid}")
+        return {"success": True, "uid": user.uid}
+    except Exception as e:
+        logger.error(f"Error saving user registration: {e}")
+        raise
 
 def save_attempt(attempt: MathAttempt):
     """Save an attempt using the configured database provider."""
@@ -61,6 +71,26 @@ def get_question_patterns_by_level(level: int = None):
         return patterns
     except Exception as e:
         logger.error(f"Error retrieving question patterns by level: {e}")
+        raise
+
+def get_user_by_uid(uid: str):
+    """Retrieve a user by UID using the configured database provider."""
+    try:
+        user = db_provider.get_user_by_uid(uid)
+        logger.debug(f"Retrieved user data for uid: {uid}")
+        return user
+    except Exception as e:
+        logger.error(f"Error retrieving user by uid: {e}")
+        raise
+
+def get_user_by_email(email: str):
+    """Retrieve a user by email using the configured database provider."""
+    try:
+        user = db_provider.get_user_by_email(email)
+        logger.debug(f"Retrieved user data for email: {email}")
+        return user
+    except Exception as e:
+        logger.error(f"Error retrieving user by email: {e}")
         raise
 
 # Initialize the database when this module is imported
