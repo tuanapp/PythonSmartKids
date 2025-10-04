@@ -4,7 +4,7 @@ from app.services import ai_service
 from app.services.ai_service import generate_practice_questions
 from app.repositories import db_service
 from app.db.vercel_migrations import migration_manager
-from datetime import datetime
+from datetime import datetime, UTC
 import logging
 import os
 
@@ -16,6 +16,10 @@ router = APIRouter()
 async def register_user(user: UserRegistration):
     """Register a new user in the backend database"""
     try:
+        # Generate registration date on backend if not provided
+        if not user.registrationDate:
+            user.registrationDate = datetime.now(UTC).isoformat()
+        
         # Save user registration to database
         result = db_service.save_user_registration(user)
         logger.debug(f"User registration saved for uid: {user.uid}")
