@@ -34,6 +34,29 @@ async def register_user(user: UserRegistration):
         logger.error(f"Error registering user: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to register user: {str(e)}")
 
+@router.get("/users/{uid}")
+async def get_user(uid: str):
+    """Get user information including subscription level"""
+    try:
+        user_data = db_service.get_user_by_uid(uid)
+        if not user_data:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        return {
+            "uid": user_data["uid"],
+            "email": user_data["email"],
+            "name": user_data["name"],
+            "displayName": user_data["display_name"],
+            "gradeLevel": user_data["grade_level"],
+            "subscription": user_data.get("subscription", 0),  # Default to 0 if not set
+            "registrationDate": user_data["registration_date"]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving user: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve user: {str(e)}")
+
 @router.post("/submit_attempt")
 async def submit_attempt(attempt: MathAttempt):
     db_service.save_attempt(attempt)

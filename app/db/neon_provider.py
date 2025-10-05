@@ -109,6 +109,7 @@ class NeonProvider(DatabaseProvider):
                     name TEXT NOT NULL,
                     display_name TEXT NOT NULL,
                     grade_level INTEGER NOT NULL,
+                    subscription INTEGER DEFAULT 0,
                     registration_date TIMESTAMPTZ NOT NULL,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -155,8 +156,20 @@ class NeonProvider(DatabaseProvider):
                 current_version = cursor.fetchone()
                 if not current_version or current_version[0] < '006':
                     cursor.execute("DELETE FROM alembic_version")
-                    cursor.execute("INSERT INTO alembic_version (version_num) VALUES ('006')")
-                    logger.info("Updated migration version to 006")
+                    cursor.execute("INSERT INTO alembic_version (version_num) VALUES ('007')")
+                    logger.info("Updated migration version to 007")
+            
+            # Check and add subscription column to users table if needed (Migration 007)
+            cursor.execute("""
+                SELECT column_name FROM information_schema.columns 
+                WHERE table_name = 'users' AND column_name = 'subscription'
+            """)
+            subscription_column_exists = cursor.fetchall()
+            
+            if not subscription_column_exists:
+                # Add subscription column with default value 0 (free users)
+                cursor.execute("ALTER TABLE users ADD COLUMN subscription INTEGER DEFAULT 0")
+                logger.info("Added subscription column to existing users table with default value 0 (free users)")
             
             conn.commit()
             logger.info("Successfully initialized Neon database with all tables and migrations")
@@ -178,14 +191,15 @@ class NeonProvider(DatabaseProvider):
             
             # Insert or update the user registration
             cursor.execute("""
-                INSERT INTO users (uid, email, name, display_name, grade_level, registration_date, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                INSERT INTO users (uid, email, name, display_name, grade_level, subscription, registration_date, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
                 ON CONFLICT (uid) 
                 DO UPDATE SET 
                     email = EXCLUDED.email,
                     name = EXCLUDED.name,
                     display_name = EXCLUDED.display_name,
                     grade_level = EXCLUDED.grade_level,
+                    subscription = EXCLUDED.subscription,
                     updated_at = NOW()
             """, (
                 user.uid,
@@ -193,6 +207,7 @@ class NeonProvider(DatabaseProvider):
                 user.name,
                 user.displayName,
                 user.gradeLevel,
+                user.subscription,
                 registration_date
             ))
             
@@ -367,7 +382,7 @@ class NeonProvider(DatabaseProvider):
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             cursor.execute("""
-                SELECT uid, email, name, display_name, grade_level, registration_date, updated_at
+                SELECT uid, email, name, display_name, grade_level, subscription, registration_date, updated_at
                 FROM users
                 WHERE uid = %s
             """, (uid,))
@@ -394,7 +409,7 @@ class NeonProvider(DatabaseProvider):
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             cursor.execute("""
-                SELECT uid, email, name, display_name, grade_level, registration_date, updated_at
+                SELECT uid, email, name, display_name, grade_level, subscription, registration_date, updated_at
                 FROM users
                 WHERE email = %s
             """, (email,))
