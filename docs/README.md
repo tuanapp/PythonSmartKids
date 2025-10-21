@@ -6,10 +6,10 @@ This folder contains all project documentation files organized for better mainta
 
 ### 📊 **Database Documentation**
 - [`DATABASE_README.md`](DATABASE_README.md) - Database setup, configuration, and usage guide
+- [`VERCEL_DATABASE_MIGRATION.md`](VERCEL_DATABASE_MIGRATION.md) - **Quick migration guide for Vercel** ⚡
 
 ### 🧪 **Testing Documentation** 
-- [`TEST_MIGRATION_COMPLETE.md`](TEST_MIGRATION_COMPLETE.md) - Complete test organization migration report
-- [`TEST_ORGANIZATION_PLAN.md`](TEST_ORGANIZATION_PLAN.md) - Original test migration planning document
+- [`TEST_ORGANIZATION_PLAN.md`](TEST_ORGANIZATION_PLAN.md) - Test organization planning document
 
 ### 🚀 **Deployment Documentation**
 - [`VERCEL_DEPLOYMENT.md`](VERCEL_DEPLOYMENT.md) - Vercel deployment configuration and setup
@@ -22,7 +22,7 @@ This folder contains all project documentation files organized for better mainta
 | Document | Purpose | Audience |
 |----------|---------|----------|
 | `DATABASE_README.md` | Database setup and operations | Developers, DevOps |
-| `TEST_MIGRATION_COMPLETE.md` | Test organization results | Developers, QA |
+| `VERCEL_DATABASE_MIGRATION.md` | **Quick Vercel migration** | DevOps, Developers |
 | `TEST_ORGANIZATION_PLAN.md` | Test migration planning | Developers, Project leads |
 | `VERCEL_DEPLOYMENT.md` | Deployment procedures | DevOps, Developers |
 | `WORKSPACE_STRUCTURE.md` | Project architecture | New developers, Contributors |

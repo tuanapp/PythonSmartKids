@@ -65,17 +65,15 @@ APP_TITLE = PythonSmartKids
 
 ### 5. Run Database Migrations
 
-After deployment, you need to run database migrations. Since Vercel doesn't support traditional Alembic migrations, use the migration API endpoints:
+After deployment, run database migrations using the admin endpoint:
 
-1. **Check migration status:**
-   ```
-   GET https://your-app.vercel.app/admin/migration-status?admin_key=your-secure-admin-key
-   ```
+```bash
+curl -X POST "https://python-smart-kids.vercel.app/admin/apply-migrations?admin_key=dev-admin-key"
+```
 
-2. **Apply all migrations:**
-   ```
-   POST https://your-app.vercel.app/admin/apply-migrations?admin_key=your-secure-admin-key
-   ```
+**That's it!** This single command handles all database migrations.
+
+📚 **For detailed migration documentation, see:** [`VERCEL_DATABASE_MIGRATION.md`](VERCEL_DATABASE_MIGRATION.md)
 
 ### 6. Redeploy with Environment Variables
 

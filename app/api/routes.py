@@ -186,38 +186,3 @@ async def apply_migrations(admin_key: str = ""):
         logger.error(f"Error applying migrations: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/admin/add-notes-column")
-async def add_notes_column(admin_key: str = ""):
-    """Specifically add the notes column to question_patterns table"""
-    # Simple admin verification - in production, use proper authentication
-    expected_key = os.getenv('ADMIN_KEY', 'dev-admin-key')
-    if admin_key != expected_key:
-        raise HTTPException(status_code=401, detail="Invalid admin key")
-    
-    try:
-        result = migration_manager.add_notes_column_migration()
-        if result['success']:
-            return result
-        else:
-            raise HTTPException(status_code=500, detail=result.get('error', 'Migration failed'))
-    except Exception as e:
-        logger.error(f"Error adding notes column: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/admin/add-level-column")
-async def add_level_column(admin_key: str = ""):
-    """Specifically add the level column to question_patterns table"""
-    # Simple admin verification - in production, use proper authentication
-    expected_key = os.getenv('ADMIN_KEY', 'dev-admin-key')
-    if admin_key != expected_key:
-        raise HTTPException(status_code=401, detail="Invalid admin key")
-    
-    try:
-        result = migration_manager.add_level_column_migration()
-        if result['success']:
-            return result
-        else:
-            raise HTTPException(status_code=500, detail=result.get('error', 'Migration failed'))
-    except Exception as e:
-        logger.error(f"Error adding level column: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
