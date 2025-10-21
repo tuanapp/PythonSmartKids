@@ -49,3 +49,8 @@ class DatabaseProvider(ABC):
     def get_user_by_email(self, email: str) -> Dict[str, Any]:
         """Retrieve user registration data by email."""
         pass
+
+    @abstractmethod
+    def save_prompt(self, uid: str, request_text: str, response_text: str, is_live: int = 1) -> None:
+        """Save AI prompt request and response to the database."""
+        pass

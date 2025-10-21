@@ -24,6 +24,7 @@ class GenerateQuestionsRequest(BaseModel):
     ai_bridge_base_url: Optional[str] = None
     ai_bridge_api_key: Optional[str] = None
     ai_bridge_model: Optional[str] = None
+    is_live: Optional[int] = 1  # 1=live from app, 0=test call (default: 1)
 
 class UserRegistration(BaseModel):
     uid: str  # Firebase User UID (28 character alphanumeric string, e.g., "FrhUjcQpTDVKK14K4y3thVcPgQd2")

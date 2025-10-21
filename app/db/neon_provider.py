@@ -116,6 +116,28 @@ class NeonProvider(DatabaseProvider):
                 )
             """)
             
+            # Create prompts table if it doesn't exist
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS prompts (
+                    id SERIAL PRIMARY KEY,
+                    uid TEXT NOT NULL,
+                    request_text TEXT NOT NULL,
+                    response_text TEXT NOT NULL,
+                    is_live INTEGER DEFAULT 1 NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            
+            # Create index on uid for faster prompt queries
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_prompts_uid ON prompts(uid)
+            """)
+            
+            # Create index on created_at for time-based queries
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_prompts_created_at ON prompts(created_at)
+            """)
+            
             # Create alembic_version table for migration tracking
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS alembic_version (
@@ -427,4 +449,31 @@ class NeonProvider(DatabaseProvider):
                 
         except Exception as e:
             logger.error(f"Error retrieving user by email: {e}")
+            raise Exception(f"Database error: {e}")
+
+    def save_prompt(self, uid: str, request_text: str, response_text: str, is_live: int = 1) -> None:
+        """Save AI prompt request and response to the Neon database."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Insert the prompt
+            cursor.execute("""
+                INSERT INTO prompts 
+                (uid, request_text, response_text, is_live, created_at)
+                VALUES (%s, %s, %s, %s, NOW())
+            """, (
+                uid,
+                request_text,
+                response_text,
+                is_live
+            ))
+            
+            conn.commit()
+            logger.debug(f"Prompt saved for user {uid} (is_live={is_live})")
+            cursor.close()
+            conn.close()
+            
+        except Exception as e:
+            logger.error(f"Error saving prompt to Neon: {e}")
             raise Exception(f"Database error: {e}")

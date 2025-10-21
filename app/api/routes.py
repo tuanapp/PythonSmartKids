@@ -73,8 +73,9 @@ async def generate_questions(request: GenerateQuestionsRequest):
     """
     Generate a new set of practice questions based on the student's previous performance.
     Optionally filter patterns by difficulty level.
+    Saves both the AI prompt request and response to the database.
     """
-    logger.debug(f"Received generate-questions request for uid: {request.uid}, level: {request.level}")
+    logger.debug(f"Received generate-questions request for uid: {request.uid}, level: {request.level}, is_live: {request.is_live}")
     try:
         # Get student's previous attempts
         attempts = db_service.get_attempts_by_uid(request.uid)
@@ -96,7 +97,29 @@ async def generate_questions(request: GenerateQuestionsRequest):
             request.ai_bridge_model,
             request.level
         )
-        logger.debug("Generated new questions successfully")        
+        logger.debug("Generated new questions successfully")
+        
+        # Save the prompt and response to database
+        try:
+            prompt_request = questions_response.get('ai_request', '')
+            prompt_response = questions_response.get('ai_response', '')
+            
+            logger.debug(f"Prompt storage check - ai_request exists: {bool(prompt_request)}, ai_response exists: {bool(prompt_response)}")
+            logger.debug(f"Response keys: {list(questions_response.keys())}")
+            
+            if prompt_request and prompt_response:
+                db_service.save_prompt(
+                    uid=request.uid,
+                    request_text=prompt_request,
+                    response_text=prompt_response,
+                    is_live=request.is_live
+                )
+                logger.debug(f"Saved prompt to database for uid: {request.uid}, is_live: {request.is_live}")
+            else:
+                logger.warning(f"Could not save prompt: missing request or response text (request={len(prompt_request) if prompt_request else 0} chars, response={len(prompt_response) if prompt_response else 0} chars)")
+        except Exception as prompt_error:
+            # Don't fail the entire request if prompt saving fails
+            logger.error(f"Error saving prompt to database: {prompt_error}")
 
         return questions_response
     except Exception as e:

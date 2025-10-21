@@ -33,6 +33,17 @@ class QuestionPattern(Base):
     level = Column(Integer, nullable=True)  # Difficulty level (e.g., 1-10)
     created_at = Column(DateTime(timezone=True), nullable=False)
 
+class Prompt(Base):
+    """SQLAlchemy model for AI prompt storage."""
+    __tablename__ = "prompts"
+
+    id = Column(Integer, primary_key=True)
+    uid = Column(String, nullable=False)  # From Firebase Users table (User UID)
+    request_text = Column(Text, nullable=False)  # The prompt sent to AI
+    response_text = Column(Text, nullable=False)  # The response from AI
+    is_live = Column(Integer, default=1, nullable=False)  # 1=live from app, 0=test call
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
 def get_engine():
     """Get a SQLAlchemy engine instance."""
     return create_engine(DATABASE_URL)

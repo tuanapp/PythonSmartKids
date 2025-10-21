@@ -93,5 +93,14 @@ def get_user_by_email(email: str):
         logger.error(f"Error retrieving user by email: {e}")
         raise
 
+def save_prompt(uid: str, request_text: str, response_text: str, is_live: int = 1):
+    """Save AI prompt request and response using the configured database provider."""
+    try:
+        db_provider.save_prompt(uid, request_text, response_text, is_live)
+        logger.debug(f"Prompt saved for user {uid} (is_live={is_live})")
+    except Exception as e:
+        logger.error(f"Error saving prompt: {e}")
+        raise
+
 # Initialize the database when this module is imported
 init_db()

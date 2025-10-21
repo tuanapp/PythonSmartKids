@@ -138,7 +138,7 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
     logger.debug(f"Found {len(weak_areas)} weak areas and {len(strong_areas)} strong areas")    # If no valid attempts, use fallback questions
     if not valid_attempts:
         logger.debug("No valid attempts found, using fallback questions")
-        return generate_fallback_questions("No valid attempts found", attempts=attempts, level=level)
+        return generate_fallback_questions("No valid attempts found", attempts=attempts, level=level, prompt_text="")
 
     # Create example JSON separately to avoid f-string issues
     response_json_format = '''
@@ -281,6 +281,7 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
                 'timestamp': datetime.now(),
                 'message': "Success",
                 'ai_response': current_response_text,
+                'ai_request': prompt['content'],  # Include the prompt text
                 'response_time': response_time,
                 'validation_result': {
                     'is_valid': validation_result['is_valid'],
@@ -301,7 +302,8 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
                 current_response_text, 
                 response_time,
                 attempts,
-                level
+                level,
+                prompt['content']  # Pass the prompt text
             )
             fallback_result['validation_result'] = {
                 'is_valid': False,
@@ -319,7 +321,7 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
         
         logger.error(f"JSON decode error: {str(je)}")
         logger.error(f"AI Bridge API response time: {response_time:.2f} seconds")
-        return generate_fallback_questions(str(je), current_response_text, response_time, attempts, level)
+        return generate_fallback_questions(str(je), current_response_text, response_time, attempts, level, prompt['content'])
     except Exception as e:
         # Calculate response time even on error
         if response_time is None:
@@ -332,9 +334,9 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
         model = ai_bridge_model or AI_BRIDGE_MODEL
         logger.error(f"ai client info : {model} {api_key} {base_url}")
         logger.error(f"AI Bridge API response time: {response_time:.2f} seconds")
-        return generate_fallback_questions(str(e), current_response_text, response_time, attempts, level)
+        return generate_fallback_questions(str(e), current_response_text, response_time, attempts, level, prompt['content'])
 
-def generate_fallback_questions(error_message="Unknown error occurred", current_response_text="", response_time=None, attempts=None, level=None):
+def generate_fallback_questions(error_message="Unknown error occurred", current_response_text="", response_time=None, attempts=None, level=None, prompt_text=""):
     """Generate basic questions as a fallback if AI fails"""
     fallback_questions = [
         {
@@ -392,12 +394,17 @@ def generate_fallback_questions(error_message="Unknown error occurred", current_
     # Only show last 4 digits of API key for security
     api_key_last3 = AI_BRIDGE_API_KEY[-3:] if AI_BRIDGE_API_KEY else "None"
     
+    # If current_response_text is empty (no AI response), use fallback questions as response
+    if not current_response_text:
+        current_response_text = json.dumps(fallback_questions, indent=2)
+    
     # Build the return response
     result = {
         'questions': fallback_questions,
         'timestamp': datetime.now(),
         'message': f"AI question generation failed: {error_message} {AI_BRIDGE_MODEL} {api_key_last3} {AI_BRIDGE_BASE_URL}",
         'ai_response': current_response_text,
+        'ai_request': prompt_text if prompt_text else f"Fallback questions generated due to error: {error_message}",  # Include ai_request for prompt storage
         'response_time': response_time
     }
     
