@@ -59,7 +59,6 @@ python env_manager.py status
 - `start-dev.ps1` - PowerShell development launcher
 - `start-prod.ps1` - PowerShell production launcher
 - `env_manager.py` - Python environment manager
-- `sqlite_provider.py` - SQLite database provider
 
 ## 🔄 Workflow
 
