@@ -2,8 +2,10 @@ from fastapi import APIRouter, HTTPException
 from app.models.schemas import MathAttempt, GenerateQuestionsRequest, UserRegistration
 from app.services import ai_service
 from app.services.ai_service import generate_practice_questions
+from app.services.user_blocking_service import UserBlockingService
 from app.repositories import db_service
 from app.db.vercel_migrations import migration_manager
+from app.db.models import get_session
 from datetime import datetime, UTC
 import logging
 import os
@@ -56,6 +58,184 @@ async def get_user(uid: str):
     except Exception as e:
         logger.error(f"Error retrieving user: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve user: {str(e)}")
+
+@router.post("/users/{user_uid}/block")
+async def block_user(
+    user_uid: str,
+    reason: str,
+    blocked_by: str,
+    notes: str = None,
+    admin_key: str = ""
+):
+    """
+    Block a user with specified reason.
+    Requires admin authentication.
+    """
+    # Verify admin access
+    expected_key = os.getenv('ADMIN_KEY', 'dev-admin-key')
+    if admin_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+    
+    try:
+        db = get_session()
+        user = UserBlockingService.block_user(
+            db=db,
+            user_uid=user_uid,
+            reason=reason,
+            blocked_by=blocked_by,
+            notes=notes
+        )
+        db.close()
+        
+        logger.info(f"User {user_uid} blocked by {blocked_by}. Reason: {reason}")
+        
+        return {
+            "success": True,
+            "message": "User blocked successfully",
+            "user_uid": user.uid,
+            "blocked_at": user.blocked_at.isoformat() if user.blocked_at else None
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error blocking user {user_uid}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to block user: {str(e)}")
+
+@router.post("/users/{user_uid}/unblock")
+async def unblock_user(
+    user_uid: str,
+    unblocked_by: str,
+    notes: str = None,
+    admin_key: str = ""
+):
+    """
+    Unblock a user.
+    Requires admin authentication.
+    """
+    # Verify admin access
+    expected_key = os.getenv('ADMIN_KEY', 'dev-admin-key')
+    if admin_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+    
+    try:
+        db = get_session()
+        user = UserBlockingService.unblock_user(
+            db=db,
+            user_uid=user_uid,
+            unblocked_by=unblocked_by,
+            notes=notes
+        )
+        db.close()
+        
+        logger.info(f"User {user_uid} unblocked by {unblocked_by}")
+        
+        return {
+            "success": True,
+            "message": "User unblocked successfully",
+            "user_uid": user.uid
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error unblocking user {user_uid}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to unblock user: {str(e)}")
+
+@router.get("/users/{user_uid}/status")
+async def check_user_status(user_uid: str):
+    """
+    Check if user is blocked and return blocking status.
+    This endpoint is public (no admin key required) for client-side checks.
+    """
+    try:
+        db = get_session()
+        is_blocked, reason = UserBlockingService.is_user_blocked(db, user_uid)
+        db.close()
+        
+        return {
+            "user_uid": user_uid,
+            "is_blocked": is_blocked,
+            "blocked_reason": reason
+        }
+    except Exception as e:
+        logger.error(f"Error checking user status for {user_uid}: {e}")
+        # Fail open - allow access if check fails
+        return {
+            "user_uid": user_uid,
+            "is_blocked": False,
+            "blocked_reason": ""
+        }
+
+@router.get("/users/{user_uid}/blocking-history")
+async def get_blocking_history(
+    user_uid: str,
+    limit: int = 10,
+    admin_key: str = ""
+):
+    """
+    Get blocking history for a user.
+    Requires admin authentication.
+    """
+    # Verify admin access
+    expected_key = os.getenv('ADMIN_KEY', 'dev-admin-key')
+    if admin_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+    
+    try:
+        db = get_session()
+        history = UserBlockingService.get_blocking_history(db, user_uid, limit)
+        db.close()
+        
+        return [
+            {
+                "id": record.id,
+                "user_uid": record.user_uid,
+                "action": record.action,
+                "reason": record.reason,
+                "blocked_at": record.blocked_at.isoformat() if record.blocked_at else None,
+                "blocked_by": record.blocked_by,
+                "unblocked_at": record.unblocked_at.isoformat() if record.unblocked_at else None,
+                "notes": record.notes
+            }
+            for record in history
+        ]
+    except Exception as e:
+        logger.error(f"Error fetching blocking history for {user_uid}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch blocking history: {str(e)}")
+
+@router.get("/admin/blocked-users")
+async def get_blocked_users(
+    limit: int = 100,
+    admin_key: str = ""
+):
+    """
+    Get all currently blocked users.
+    Requires admin authentication.
+    """
+    # Verify admin access
+    expected_key = os.getenv('ADMIN_KEY', 'dev-admin-key')
+    if admin_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+    
+    try:
+        db = get_session()
+        blocked_users = UserBlockingService.get_all_blocked_users(db, limit)
+        db.close()
+        
+        return [
+            {
+                "uid": user.uid,
+                "email": user.email,
+                "name": user.name,
+                "is_blocked": user.is_blocked,
+                "blocked_reason": user.blocked_reason,
+                "blocked_at": user.blocked_at.isoformat() if user.blocked_at else None,
+                "blocked_by": user.blocked_by
+            }
+            for user in blocked_users
+        ]
+    except Exception as e:
+        logger.error(f"Error fetching blocked users: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch blocked users: {str(e)}")
 
 @router.post("/submit_attempt")
 async def submit_attempt(attempt: MathAttempt):

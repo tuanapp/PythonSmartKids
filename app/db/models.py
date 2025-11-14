@@ -44,6 +44,38 @@ class Prompt(Base):
     is_live = Column(Integer, default=1, nullable=False)  # 1=live from app, 0=test call
     created_at = Column(DateTime(timezone=True), nullable=False)
 
+class User(Base):
+    """SQLAlchemy model for users."""
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True)
+    uid = Column(String, unique=True, nullable=False, index=True)  # Firebase User UID
+    email = Column(String, nullable=False)
+    name = Column(String, nullable=False)
+    display_name = Column(String, nullable=False)
+    grade_level = Column(Integer, nullable=False)
+    subscription = Column(Integer, default=0, nullable=False)  # 0=free, 1=trial, 2+=premium
+    registration_date = Column(DateTime(timezone=True), nullable=False)
+    
+    # Blocking fields
+    is_blocked = Column(Boolean, default=False, nullable=False, index=True)
+    blocked_reason = Column(Text, nullable=True)
+    blocked_at = Column(DateTime(timezone=True), nullable=True)
+    blocked_by = Column(String, nullable=True)
+
+class UserBlockingHistory(Base):
+    """SQLAlchemy model for user blocking history."""
+    __tablename__ = "user_blocking_history"
+
+    id = Column(Integer, primary_key=True)
+    user_uid = Column(String, nullable=False, index=True)  # Firebase User UID
+    action = Column(String(50), nullable=False, index=True)  # 'BLOCKED', 'UNBLOCKED'
+    reason = Column(Text, nullable=True)
+    blocked_at = Column(DateTime(timezone=True), nullable=True)
+    blocked_by = Column(String, nullable=True)
+    unblocked_at = Column(DateTime(timezone=True), nullable=True)
+    notes = Column(Text, nullable=True)
+
 def get_engine():
     """Get a SQLAlchemy engine instance."""
     return create_engine(DATABASE_URL)

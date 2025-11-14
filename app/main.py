@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import routes
+from app.middleware.user_blocking_middleware import UserBlockingMiddleware
 import logging
 
 # Configure logging
@@ -17,6 +18,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add user blocking middleware
+app.add_middleware(UserBlockingMiddleware)
 
 @app.on_event("startup")
 async def startup_event():
