@@ -73,6 +73,26 @@ class VercelMigrationManager:
                 prompts_indexes_count = cursor.fetchone()[0]
                 prompts_indexes_exist = prompts_indexes_count == 2
             
+            # Check if user blocking fields exist
+            user_blocking_exists = False
+            user_blocking_history_exists = False
+            if 'users' in existing_tables:
+                cursor.execute("""
+                    SELECT column_name FROM information_schema.columns 
+                    WHERE table_name = 'users' AND column_name IN ('is_blocked', 'blocked_reason', 'blocked_at', 'blocked_by')
+                """)
+                blocking_columns = [row[0] for row in cursor.fetchall()]
+                user_blocking_exists = len(blocking_columns) == 4
+            
+            # Check if user_blocking_history table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'user_blocking_history'
+                )
+            """)
+            user_blocking_history_exists = cursor.fetchone()[0]
+            
             cursor.close()
             conn.close()
             
@@ -84,12 +104,16 @@ class VercelMigrationManager:
                 'level_column_exists': level_column_exists,
                 'prompts_table_exists': prompts_table_exists,
                 'prompts_indexes_exist': prompts_indexes_exist,
+                'user_blocking_exists': user_blocking_exists,
+                'user_blocking_history_exists': user_blocking_history_exists,
                 'needs_migration': (
-                    current_version != '007' or 
+                    current_version != '008' or 
                     not notes_column_exists or 
                     not level_column_exists or
                     not prompts_table_exists or
-                    not prompts_indexes_exist
+                    not prompts_indexes_exist or
+                    not user_blocking_exists or
+                    not user_blocking_history_exists
                 )
             }
             
@@ -116,19 +140,25 @@ class VercelMigrationManager:
             prompts_result = self.add_prompts_table_migration()
             logger.info(f"Prompts table migration result: {prompts_result['message']}")
             
+            # Ensure user blocking fields exist
+            blocking_result = self.add_user_blocking_migration()
+            logger.info(f"User blocking migration result: {blocking_result['message']}")
+            
             # Verify the migration was successful
             status = self.check_migration_status()
             
             return {
                 'success': True,
-                'message': 'All migrations applied successfully (including prompts table)',
+                'message': 'All migrations applied successfully (including user blocking)',
                 'final_status': status,
                 'migrations_applied': [
                     'Base tables (attempts, question_patterns, users)',
                     'Notes column on question_patterns',
                     'Level column on question_patterns',
                     'Prompts table with indexes',
-                    'Subscription column on users'
+                    'Subscription column on users',
+                    'User blocking fields on users',
+                    'User blocking history table'
                 ]
             }
             
@@ -318,6 +348,152 @@ class VercelMigrationManager:
             
         except Exception as e:
             logger.error(f"Error creating prompts table: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def add_user_blocking_migration(self) -> Dict[str, Any]:
+        """
+        Apply the user blocking migration (008).
+        Adds blocking fields to users table and creates user_blocking_history table.
+        """
+        try:
+            conn = self.db_provider._get_connection()
+            cursor = conn.cursor()
+            
+            messages = []
+            
+            # Check if users table exists, create if not
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'users'
+                )
+            """)
+            users_exists = cursor.fetchone()[0]
+            
+            if not users_exists:
+                # Create users table with blocking fields
+                cursor.execute("""
+                    CREATE TABLE users (
+                        id SERIAL PRIMARY KEY,
+                        uid VARCHAR(255) UNIQUE NOT NULL,
+                        email VARCHAR(255) NOT NULL,
+                        name VARCHAR(255) NOT NULL,
+                        display_name VARCHAR(255) NOT NULL,
+                        grade_level INTEGER NOT NULL,
+                        subscription INTEGER DEFAULT 0 NOT NULL,
+                        registration_date TIMESTAMP WITH TIME ZONE NOT NULL,
+                        is_blocked BOOLEAN DEFAULT FALSE NOT NULL,
+                        blocked_reason TEXT,
+                        blocked_at TIMESTAMP WITH TIME ZONE,
+                        blocked_by VARCHAR(255)
+                    )
+                """)
+                messages.append("Created users table with blocking fields")
+                logger.info("Created users table")
+                
+                # Create index on uid
+                cursor.execute("CREATE INDEX idx_users_uid ON users(uid)")
+                messages.append("Created index on users.uid")
+            else:
+                # Add blocking fields to existing users table if they don't exist
+                cursor.execute("""
+                    SELECT column_name FROM information_schema.columns 
+                    WHERE table_name = 'users' AND column_name IN ('is_blocked', 'blocked_reason', 'blocked_at', 'blocked_by')
+                """)
+                existing_blocking_columns = [row[0] for row in cursor.fetchall()]
+                
+                if 'is_blocked' not in existing_blocking_columns:
+                    cursor.execute("ALTER TABLE users ADD COLUMN is_blocked BOOLEAN DEFAULT FALSE NOT NULL")
+                    messages.append("Added is_blocked column to users table")
+                    logger.info("Added is_blocked column")
+                
+                if 'blocked_reason' not in existing_blocking_columns:
+                    cursor.execute("ALTER TABLE users ADD COLUMN blocked_reason TEXT")
+                    messages.append("Added blocked_reason column to users table")
+                    logger.info("Added blocked_reason column")
+                
+                if 'blocked_at' not in existing_blocking_columns:
+                    cursor.execute("ALTER TABLE users ADD COLUMN blocked_at TIMESTAMP WITH TIME ZONE")
+                    messages.append("Added blocked_at column to users table")
+                    logger.info("Added blocked_at column")
+                
+                if 'blocked_by' not in existing_blocking_columns:
+                    cursor.execute("ALTER TABLE users ADD COLUMN blocked_by VARCHAR(255)")
+                    messages.append("Added blocked_by column to users table")
+                    logger.info("Added blocked_by column")
+            
+            # Create index for blocked users if it doesn't exist
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM pg_indexes 
+                    WHERE tablename = 'users' AND indexname = 'idx_users_is_blocked'
+                )
+            """)
+            blocked_index_exists = cursor.fetchone()[0]
+            
+            if not blocked_index_exists:
+                cursor.execute("CREATE INDEX idx_users_is_blocked ON users(is_blocked) WHERE is_blocked = TRUE")
+                messages.append("Created index on users.is_blocked")
+                logger.info("Created index on users.is_blocked")
+            
+            # Check if user_blocking_history table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'user_blocking_history'
+                )
+            """)
+            history_exists = cursor.fetchone()[0]
+            
+            if not history_exists:
+                # Create user_blocking_history table
+                cursor.execute("""
+                    CREATE TABLE user_blocking_history (
+                        id SERIAL PRIMARY KEY,
+                        user_uid VARCHAR(255) NOT NULL,
+                        action VARCHAR(50) NOT NULL,
+                        reason TEXT,
+                        blocked_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                        blocked_by VARCHAR(255),
+                        unblocked_at TIMESTAMP WITHOUT TIME ZONE,
+                        notes TEXT
+                    )
+                """)
+                messages.append("Created user_blocking_history table")
+                logger.info("Created user_blocking_history table")
+                
+                # Create indexes
+                cursor.execute("CREATE INDEX idx_blocking_history_uid ON user_blocking_history(user_uid)")
+                cursor.execute("CREATE INDEX idx_blocking_history_action ON user_blocking_history(action)")
+                cursor.execute("CREATE INDEX idx_blocking_history_blocked_at ON user_blocking_history(blocked_at DESC)")
+                messages.append("Created indexes on user_blocking_history table")
+                logger.info("Created indexes on user_blocking_history")
+            else:
+                messages.append("User blocking history table already exists")
+            
+            # Update migration version
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) PRIMARY KEY)
+            """)
+            cursor.execute("""
+                INSERT INTO alembic_version (version_num) VALUES ('008')
+                ON CONFLICT (version_num) DO NOTHING
+            """)
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            return {
+                'success': True,
+                'message': '; '.join(messages) if messages else 'User blocking already configured'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error adding user blocking migration: {e}")
             return {
                 'success': False,
                 'error': str(e)
