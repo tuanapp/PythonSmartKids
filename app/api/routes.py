@@ -305,7 +305,7 @@ async def generate_questions(request: GenerateQuestionsRequest):
             patterns = db_service.get_question_patterns()
             logger.debug(f"Retrieved {len(patterns)} patterns (all levels)")
 
-        # Generate questions with LLM tracking (uid is now passed)
+        # Generate questions with LLM tracking (uid and is_live are passed)
         questions_response = generate_practice_questions(
             uid=request.uid,  # Pass uid for LLM logging
             attempts=attempts, 
@@ -313,7 +313,8 @@ async def generate_questions(request: GenerateQuestionsRequest):
             ai_bridge_base_url=request.ai_bridge_base_url,
             ai_bridge_api_key=request.ai_bridge_api_key,
             ai_bridge_model=request.ai_bridge_model,
-            level=request.level
+            level=request.level,
+            is_live=request.is_live  # Pass is_live to track production vs test calls
         )
         logger.debug("Generated new questions successfully")
         
@@ -321,8 +322,11 @@ async def generate_questions(request: GenerateQuestionsRequest):
         # No need for separate question_generations table
         prompt_id = questions_response.get('prompt_id')
         
-        # Add tracking info to response (updated count after this generation)
-        questions_response['daily_count'] = limit_check['current_count'] + 1  # After this generation
+        # Query actual current count AFTER generation is saved (more accurate than pre-query + 1)
+        actual_count = prompt_service.get_daily_question_count(request.uid)
+        
+        # Add tracking info to response (actual count after this generation)
+        questions_response['daily_count'] = actual_count
         questions_response['daily_limit'] = limit_check['max_count']
         questions_response['is_premium'] = limit_check['is_premium']
         

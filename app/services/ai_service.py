@@ -105,7 +105,7 @@ def analyze_attempts(attempts):
     
     return weak_areas, number_ranges
 
-def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None, ai_bridge_api_key=None, ai_bridge_model=None, level=None):
+def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None, ai_bridge_api_key=None, ai_bridge_model=None, level=None, is_live=1):
     """
     Generate questions using AI, focusing on student's weak areas based on their attempt history.
     
@@ -117,6 +117,7 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
         ai_bridge_api_key: Optional custom AI API key
         ai_bridge_model: Optional custom AI model name
         level: Optional difficulty level
+        is_live: 1=live production call, 0=test/local call (default: 1)
         
     Returns:
         Dictionary with questions and metadata, including prompt_id for tracking
@@ -369,7 +370,7 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
                 response_time_ms=response_time_ms,
                 status='success',
                 error_message=None,
-                is_live=1,
+                is_live=is_live,  # Use passed is_live parameter
                 level=level,
                 source='api'
             )
@@ -413,7 +414,7 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
                 response_time_ms=response_time_ms,
                 status=status,
                 error_message=error_message,
-                is_live=1,
+                is_live=is_live,
                 level=level,
                 source='api'
             )
@@ -460,7 +461,7 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
             response_time_ms=response_time_ms,
             status=status,
             error_message=error_message,
-            is_live=1,
+            is_live=is_live,
             level=level,
             source='fallback'
         )
@@ -496,7 +497,7 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
             response_time_ms=response_time_ms,
             status=status,
             error_message=error_message,
-            is_live=1,
+            is_live=is_live,
             level=level,
             source='fallback'
         )

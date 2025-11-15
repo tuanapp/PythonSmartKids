@@ -111,8 +111,10 @@ class NeonProvider(DatabaseProvider):
                     grade_level INTEGER NOT NULL,
                     subscription INTEGER DEFAULT 0,
                     registration_date TIMESTAMPTZ NOT NULL,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    is_blocked BOOLEAN DEFAULT FALSE,
+                    blocked_reason TEXT,
+                    blocked_at TIMESTAMPTZ,
+                    blocked_by TEXT
                 )
             """)
             
@@ -213,16 +215,15 @@ class NeonProvider(DatabaseProvider):
             
             # Insert or update the user registration
             cursor.execute("""
-                INSERT INTO users (uid, email, name, display_name, grade_level, subscription, registration_date, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                INSERT INTO users (uid, email, name, display_name, grade_level, subscription, registration_date)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (uid) 
                 DO UPDATE SET 
                     email = EXCLUDED.email,
                     name = EXCLUDED.name,
                     display_name = EXCLUDED.display_name,
                     grade_level = EXCLUDED.grade_level,
-                    subscription = EXCLUDED.subscription,
-                    updated_at = NOW()
+                    subscription = EXCLUDED.subscription
             """, (
                 user.uid,
                 user.email,
@@ -404,7 +405,8 @@ class NeonProvider(DatabaseProvider):
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             cursor.execute("""
-                SELECT uid, email, name, display_name, grade_level, subscription, registration_date, updated_at
+                SELECT uid, email, name, display_name, grade_level, subscription, registration_date,
+                       is_blocked, blocked_reason, blocked_at, blocked_by
                 FROM users
                 WHERE uid = %s
             """, (uid,))
@@ -431,7 +433,8 @@ class NeonProvider(DatabaseProvider):
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             cursor.execute("""
-                SELECT uid, email, name, display_name, grade_level, subscription, registration_date, updated_at
+                SELECT uid, email, name, display_name, grade_level, subscription, registration_date,
+                       is_blocked, blocked_reason, blocked_at, blocked_by
                 FROM users
                 WHERE email = %s
             """, (email,))
