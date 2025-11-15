@@ -135,10 +135,20 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
         else:
             strong_areas.append(question_info)
     
-    logger.debug(f"Found {len(weak_areas)} weak areas and {len(strong_areas)} strong areas")    # If no valid attempts, use fallback questions
-    if not valid_attempts:
-        logger.debug("No valid attempts found, using fallback questions")
-        return generate_fallback_questions("No valid attempts found", attempts=attempts, level=level, prompt_text="")
+    logger.debug(f"Found {len(weak_areas)} weak areas and {len(strong_areas)} strong areas")
+    
+    # Determine if this is a new user (no attempts at all) or a user with invalid attempt data
+    is_new_user = len(attempts) == 0
+    has_invalid_data_only = len(attempts) > 0 and not valid_attempts
+    
+    # If user has attempts but they're all invalid, use fallback questions
+    if has_invalid_data_only:
+        logger.warning("User has attempts but none are valid (missing required fields), using fallback questions")
+        return generate_fallback_questions("Invalid attempt data", attempts=attempts, level=level, prompt_text="")
+    
+    # For new users with no attempts, continue to generate AI questions from patterns
+    if is_new_user:
+        logger.info("New user detected (zero attempts), generating questions from patterns without history")
 
     # Create example JSON separately to avoid f-string issues
     response_json_format = '''
@@ -189,31 +199,64 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
 
     difficulty = 'a & b variables must range from -999 to 999. '    
 
-    # Craft a detailed prompt for the AI
-    prompt = {
-        "role": "user",
-        "content": f"""Generate a set of math questions for each question pattern for a student based on their performance history. 
+    # Craft a detailed prompt for the AI based on whether this is a new user or existing user
+    if is_new_user:
+        # Prompt for new users without attempt history
+        prompt = {
+            "role": "user",
+            "content": f"""Generate a set of math questions for a NEW student who is just starting. 
 
-        Context:
-        - Questions they struggled with: {json.dumps(weak_areas, indent=2)}
-        - Questions they mastered: {json.dumps(strong_areas, indent=2)}
-        - Available question patterns:
-        {chr(10).join(pattern_info)}
+            Context:
+            - This is a new student with no previous attempt history
+            - Available question patterns:
+            {chr(10).join(pattern_info)}
 
-        Requirements:
-        1. Generate a question for each question pattern
-        2. Focus on areas where the student made mistakes
-        3. Include similar but slightly different versions of questions they got wrong
-        4. Avoid exact repetition of mastered questions
-        5. Include at least one question from their strong areas but with increased difficulty
-        6. Follow any special formatting requirements mentioned in the pattern notes (e.g., decimal places, units, etc.)
-        7. Consider the difficulty level indicated in square brackets [Level X] when generating questions
-        8. {difficulty}        Return ONLY a JSON object for each question pattern, with the following format for each question and answer set: 
-        {response_json_format}        9. Generate JSON output only, exclude any text, narrative or notes. Return JSON data without any wrapping text or formatting. return a cleaned and properly formatted JSON"""
-    }
+            Requirements:
+            1. Generate a question for each question pattern
+            2. Start with appropriate difficulty for a beginner
+            3. Cover a variety of question types to assess the student's initial skill level
+            4. Follow any special formatting requirements mentioned in the pattern notes (e.g., decimal places, units, etc.)
+            5. Consider the difficulty level indicated in square brackets [Level X] when generating questions
+            6. {difficulty}
+            
+            Return ONLY a JSON object for each question pattern, with the following format for each question and answer set: 
+            {response_json_format}
+            
+            7. Generate JSON output only, exclude any text, narrative or notes. Return JSON data without any wrapping text or formatting. return a cleaned and properly formatted JSON"""
+        }
+    else:
+        # Prompt for existing users with attempt history
+        prompt = {
+            "role": "user",
+            "content": f"""Generate a set of math questions for each question pattern for a student based on their performance history. 
+
+            Context:
+            - Questions they struggled with: {json.dumps(weak_areas, indent=2)}
+            - Questions they mastered: {json.dumps(strong_areas, indent=2)}
+            - Available question patterns:
+            {chr(10).join(pattern_info)}
+
+            Requirements:
+            1. Generate a question for each question pattern
+            2. Focus on areas where the student made mistakes
+            3. Include similar but slightly different versions of questions they got wrong
+            4. Avoid exact repetition of mastered questions
+            5. Include at least one question from their strong areas but with increased difficulty
+            6. Follow any special formatting requirements mentioned in the pattern notes (e.g., decimal places, units, etc.)
+            7. Consider the difficulty level indicated in square brackets [Level X] when generating questions
+            8. {difficulty}
+            
+            Return ONLY a JSON object for each question pattern, with the following format for each question and answer set: 
+            {response_json_format}
+            
+            9. Generate JSON output only, exclude any text, narrative or notes. Return JSON data without any wrapping text or formatting. return a cleaned and properly formatted JSON"""
+        }
     
     logger.debug("Sending prompt to OpenAI")
-    logger.debug(f"Prompt context - Weak areas: {len(weak_areas)}, Strong areas: {len(strong_areas)}, Patterns: {len(patterns)}")    # Start timing the API call
+    if is_new_user:
+        logger.info(f"Generating questions for NEW USER - Patterns: {len(patterns)}")
+    else:
+        logger.debug(f"Prompt context - Weak areas: {len(weak_areas)}, Strong areas: {len(strong_areas)}, Patterns: {len(patterns)}")    # Start timing the API call
     api_start_time = datetime.now()
     response_time = None
     
@@ -291,7 +334,9 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
                     'warnings_count': len(validation_result['warnings']),
                     'ai_model': model,
                     'historical_records': f"{len(attempts)} db attempts used out of {MAX_ATTEMPTS_HISTORY_LIMIT} max",
-                    'level': level
+                    'level': level,
+                    'is_new_user': is_new_user,
+                    'user_type': 'new_user' if is_new_user else 'returning_user'
                 }
             }
         else:
@@ -310,7 +355,9 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
                 'original_errors': validation_result['errors'],
                 'original_warnings': validation_result['warnings'],
                 'historical_records': f"{len(attempts)} db attempts used out of {MAX_ATTEMPTS_HISTORY_LIMIT} max",
-                'level': level
+                'level': level,
+                'is_new_user': is_new_user,
+                'user_type': 'new_user' if is_new_user else 'returning_user'
             }
             return fallback_result
     except json.JSONDecodeError as je:
@@ -410,10 +457,13 @@ def generate_fallback_questions(error_message="Unknown error occurred", current_
     
     # Add historical records info if attempts data is available
     if attempts is not None:
+        is_new_user_fallback = len(attempts) == 0
         result['validation_result'] = {
             'is_valid': False,
             'historical_records': f"{len(attempts)} db attempts used out of {MAX_ATTEMPTS_HISTORY_LIMIT} max",
-            'level': level
+            'level': level,
+            'is_new_user': is_new_user_fallback,
+            'user_type': 'new_user' if is_new_user_fallback else 'returning_user'
         }
     
     return result
