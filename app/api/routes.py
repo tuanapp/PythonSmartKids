@@ -7,6 +7,7 @@ from app.services.user_blocking_service import UserBlockingService
 from app.repositories import db_service
 from app.db.vercel_migrations import migration_manager
 from app.db.models import get_session
+from app.db.db_factory import DatabaseFactory
 from datetime import datetime, UTC
 import logging
 import os
@@ -421,4 +422,50 @@ async def apply_migrations(admin_key: str = ""):
     except Exception as e:
         logger.error(f"Error applying migrations: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/debug/daily-count/{uid}")
+async def debug_daily_count(uid: str):
+    """Debug endpoint to check daily question count"""
+    try:
+        prompt_service = PromptService()
+        count = prompt_service.get_daily_question_generation_count(uid)
+        
+        # Also get raw data
+        db = DatabaseFactory.get_provider()
+        conn = db._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT id, created_at, request_type, status, is_live, level, source
+            FROM prompts
+            WHERE uid = %s AND request_type = 'question_generation'
+            ORDER BY created_at DESC
+            LIMIT 10
+        """, (uid,))
+        
+        recent_prompts = []
+        for row in cursor.fetchall():
+            recent_prompts.append({
+                'id': row[0],
+                'created_at': str(row[1]),
+                'request_type': row[2],
+                'status': row[3],
+                'is_live': row[4],
+                'level': row[5],
+                'source': row[6]
+            })
+        
+        cursor.close()
+        conn.close()
+        
+        return {
+            'uid': uid,
+            'daily_count': count,
+            'recent_prompts': recent_prompts,
+            'total_prompts': len(recent_prompts)
+        }
+    except Exception as e:
+        logger.error(f"Error in debug endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
