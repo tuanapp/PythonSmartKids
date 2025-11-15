@@ -119,7 +119,7 @@ class QuestionGenerationService:
         uid: str,
         level: Optional[int] = None,
         source: str = 'api',
-        llm_interaction_id: Optional[int] = None
+        prompt_id: Optional[int] = None
     ) -> Optional[int]:
         """
         Record a question generation event.
@@ -128,7 +128,7 @@ class QuestionGenerationService:
             uid: Firebase User UID
             level: Difficulty level requested (1-6)
             source: Source of questions ('api', 'cached', 'fallback')
-            llm_interaction_id: ID of associated LLM interaction (if applicable)
+            prompt_id: ID of associated prompt/AI interaction (if applicable)
             
         Returns:
             ID of the created question_generation record, or None on error
@@ -142,10 +142,10 @@ class QuestionGenerationService:
             
             cursor.execute("""
                 INSERT INTO question_generations 
-                (uid, generation_date, generation_datetime, level, source, llm_interaction_id)
+                (uid, generation_date, generation_datetime, level, source, prompt_id)
                 VALUES (%s, %s, %s, %s, %s, %s)
                 RETURNING id
-            """, (uid, today, now, level, source, llm_interaction_id))
+            """, (uid, today, now, level, source, prompt_id))
             
             generation_id = cursor.fetchone()[0]
             conn.commit()

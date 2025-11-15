@@ -35,15 +35,38 @@ class QuestionPattern(Base):
     created_at = Column(DateTime(timezone=True), nullable=False)
 
 class Prompt(Base):
-    """SQLAlchemy model for AI prompt storage."""
+    """SQLAlchemy model for AI prompt storage with full LLM interaction tracking."""
     __tablename__ = "prompts"
 
     id = Column(Integer, primary_key=True)
-    uid = Column(String, nullable=False)  # From Firebase Users table (User UID)
-    request_text = Column(Text, nullable=False)  # The prompt sent to AI
-    response_text = Column(Text, nullable=False)  # The response from AI
+    uid = Column(String, ForeignKey('users.uid', ondelete='CASCADE'), nullable=False, index=True)
+    
+    # Request details
+    request_type = Column(String(50), nullable=False, default='question_generation')  # Type of request
+    request_text = Column(Text, nullable=False)  # The prompt sent to AI (legacy name for compatibility)
+    model_name = Column(String(100), nullable=True)  # AI model used
+    
+    # Response details
+    response_text = Column(Text, nullable=True)  # The response from AI (nullable for errors)
+    response_time_ms = Column(Integer, nullable=True)  # Response time in milliseconds
+    
+    # Token usage and cost tracking
+    prompt_tokens = Column(Integer, nullable=True)
+    completion_tokens = Column(Integer, nullable=True)
+    total_tokens = Column(Integer, nullable=True)
+    estimated_cost_usd = Column(Float, nullable=True)  # Calculated cost
+    
+    # Success/Error tracking
+    status = Column(String(50), nullable=False, default='success')  # 'success', 'error', 'timeout'
+    error_message = Column(Text, nullable=True)
+    
+    # Metadata
     is_live = Column(Integer, default=1, nullable=False)  # 1=live from app, 0=test call
     created_at = Column(DateTime(timezone=True), nullable=False)
+    
+    # Relationships
+    user = relationship("User", back_populates="prompts")
+    question_generation = relationship("QuestionGeneration", back_populates="prompt", uselist=False)
 
 class User(Base):
     """SQLAlchemy model for users."""
@@ -65,8 +88,8 @@ class User(Base):
     blocked_by = Column(String, nullable=True)
     
     # Relationships
+    prompts = relationship("Prompt", back_populates="user", cascade="all, delete-orphan")
     question_generations = relationship("QuestionGeneration", back_populates="user", cascade="all, delete-orphan")
-    llm_interactions = relationship("LLMInteraction", back_populates="user", cascade="all, delete-orphan")
 
 class UserBlockingHistory(Base):
     """SQLAlchemy model for user blocking history."""
@@ -91,33 +114,11 @@ class QuestionGeneration(Base):
     generation_datetime = Column(DateTime(timezone=True), nullable=False)  # Full timestamp
     level = Column(Integer, nullable=True)  # Difficulty level requested (1-6)
     source = Column(String(50), default='api', nullable=False)  # 'api', 'cached', 'fallback'
-    llm_interaction_id = Column(Integer, ForeignKey('llm_interactions.id', ondelete='SET NULL'), nullable=True)  # Link to LLM call
+    prompt_id = Column(Integer, ForeignKey('prompts.id', ondelete='SET NULL'), nullable=True)  # Link to prompt/LLM call
     
     # Relationships
     user = relationship("User", back_populates="question_generations")
-    llm_interaction = relationship("LLMInteraction", back_populates="question_generation")
-
-class LLMInteraction(Base):
-    """SQLAlchemy model for tracking LLM API interactions."""
-    __tablename__ = "llm_interactions"
-
-    id = Column(Integer, primary_key=True)
-    uid = Column(String, ForeignKey('users.uid', ondelete='CASCADE'), nullable=False, index=True)  # Firebase User UID
-    request_datetime = Column(DateTime(timezone=True), nullable=False, index=True)
-    prompt_text = Column(Text, nullable=False)  # The full prompt sent to LLM
-    response_text = Column(Text, nullable=True)  # The full response from LLM (nullable in case of errors)
-    model_name = Column(String(100), nullable=True)  # e.g., 'gpt-4', 'gpt-3.5-turbo'
-    prompt_tokens = Column(Integer, nullable=True)  # Token count for prompt
-    completion_tokens = Column(Integer, nullable=True)  # Token count for response
-    total_tokens = Column(Integer, nullable=True)  # Total tokens used
-    estimated_cost_usd = Column(Float, nullable=True)  # Calculated cost in USD
-    response_time_ms = Column(Integer, nullable=True)  # Response time in milliseconds
-    status = Column(String(50), default='success', nullable=False)  # 'success', 'error', 'timeout'
-    error_message = Column(Text, nullable=True)  # Error details if status != 'success'
-    
-    # Relationships
-    user = relationship("User", back_populates="llm_interactions")
-    question_generation = relationship("QuestionGeneration", back_populates="llm_interaction", uselist=False)
+    prompt = relationship("Prompt", back_populates="question_generation")
 
 def get_engine():
     """Get a SQLAlchemy engine instance."""

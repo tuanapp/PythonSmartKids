@@ -326,15 +326,15 @@ async def generate_questions(request: GenerateQuestionsRequest):
                 source = 'cached'
         
         # Record the question generation event
-        llm_interaction_id = questions_response.get('llm_interaction_id')  # May be None for fallback
+        prompt_id = questions_response.get('prompt_id')  # May be None for fallback
         generation_id = question_gen_service.record_generation(
             uid=request.uid,
             level=request.level,
             source=source,
-            llm_interaction_id=llm_interaction_id
+            prompt_id=prompt_id
         )
         
-        logger.info(f"Recorded generation event: id={generation_id}, source={source}, llm_id={llm_interaction_id}")
+        logger.info(f"Recorded generation event: id={generation_id}, source={source}, prompt_id={prompt_id}")
         
         # Add generation tracking info to response
         questions_response['generation_id'] = generation_id
