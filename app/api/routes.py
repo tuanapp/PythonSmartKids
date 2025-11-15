@@ -442,6 +442,7 @@ async def debug_daily_count(uid: str):
             ORDER BY ordinal_position
         """)
         columns = [{'name': row[0], 'type': row[1]} for row in cursor.fetchall()]
+        column_names = [col['name'] for col in columns]
         
         # Check if question_generations table exists
         cursor.execute("""
@@ -456,23 +457,34 @@ async def debug_daily_count(uid: str):
         cursor.execute("SELECT COUNT(*) FROM prompts WHERE uid = %s", (uid,))
         total_count = cursor.fetchone()[0]
         
-        # Get recent prompts with only guaranteed columns
-        cursor.execute("""
-            SELECT id, created_at, status, is_live
+        # Get recent prompts with only columns that exist
+        select_fields = ['id', 'created_at']
+        if 'status' in column_names:
+            select_fields.append('status')
+        if 'is_live' in column_names:
+            select_fields.append('is_live')
+        if 'request_type' in column_names:
+            select_fields.append('request_type')
+        if 'level' in column_names:
+            select_fields.append('level')
+        if 'source' in column_names:
+            select_fields.append('source')
+            
+        query = f"""
+            SELECT {', '.join(select_fields)}
             FROM prompts
             WHERE uid = %s
             ORDER BY created_at DESC
             LIMIT 10
-        """, (uid,))
+        """
+        cursor.execute(query, (uid,))
         
         recent_prompts = []
         for row in cursor.fetchall():
-            recent_prompts.append({
-                'id': row[0],
-                'created_at': str(row[1]),
-                'status': row[2],
-                'is_live': row[3]
-            })
+            prompt_data = {}
+            for i, field in enumerate(select_fields):
+                prompt_data[field] = str(row[i]) if row[i] is not None else None
+            recent_prompts.append(prompt_data)
         
         # Try to get daily count using the service
         try:
@@ -488,7 +500,7 @@ async def debug_daily_count(uid: str):
             'migration_status': {
                 'question_generations_table_exists': question_generations_exists,
                 'prompts_columns': columns,
-                'migration_008_applied': not question_generations_exists  # If question_generations is gone, migration is applied
+                'migration_008_applied': not question_generations_exists and 'request_type' in column_names
             },
             'counts': {
                 'total_prompts': total_count,
