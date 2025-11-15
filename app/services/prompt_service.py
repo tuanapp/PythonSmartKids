@@ -331,12 +331,13 @@ class PromptService:
                 date = datetime.now(UTC)
             
             # Query for prompts of type 'question_generation' on the specified date
+            # Use AT TIME ZONE to ensure consistent timezone comparison
             cursor.execute("""
                 SELECT COUNT(*) 
                 FROM prompts
                 WHERE uid = %s 
                   AND request_type = 'question_generation'
-                  AND DATE(created_at) = DATE(%s)
+                  AND DATE(created_at AT TIME ZONE 'UTC') = DATE(%s AT TIME ZONE 'UTC')
             """, (uid, date))
             
             count = cursor.fetchone()[0]
