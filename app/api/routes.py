@@ -323,7 +323,7 @@ async def generate_questions(request: GenerateQuestionsRequest):
         prompt_id = questions_response.get('prompt_id')
         
         # Query actual current count AFTER generation is saved (more accurate than pre-query + 1)
-        actual_count = prompt_service.get_daily_question_count(request.uid)
+        actual_count = prompt_service.get_daily_question_generation_count(request.uid)
         
         # Add tracking info to response (actual count after this generation)
         questions_response['daily_count'] = actual_count
