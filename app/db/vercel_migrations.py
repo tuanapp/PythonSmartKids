@@ -93,15 +93,6 @@ class VercelMigrationManager:
             """)
             user_blocking_history_exists = cursor.fetchone()[0]
             
-            # Check if llm_interactions table exists
-            cursor.execute("""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_name = 'llm_interactions'
-                )
-            """)
-            llm_interactions_exists = cursor.fetchone()[0]
-            
             # Check if question_generations table exists
             cursor.execute("""
                 SELECT EXISTS (
@@ -124,17 +115,15 @@ class VercelMigrationManager:
                 'prompts_indexes_exist': prompts_indexes_exist,
                 'user_blocking_exists': user_blocking_exists,
                 'user_blocking_history_exists': user_blocking_history_exists,
-                'llm_interactions_exists': llm_interactions_exists,
                 'question_generations_exists': question_generations_exists,
                 'needs_migration': (
-                    current_version != '2d3eefae954c' or  # Updated to latest version
+                    current_version != '007' or  # Updated to latest version
                     not notes_column_exists or 
                     not level_column_exists or
                     not prompts_table_exists or
                     not prompts_indexes_exist or
                     not user_blocking_exists or
                     not user_blocking_history_exists or
-                    not llm_interactions_exists or
                     not question_generations_exists
                 )
             }
@@ -529,15 +518,65 @@ class VercelMigrationManager:
     
     def add_question_generation_tracking_migration(self) -> Dict[str, Any]:
         """
-        Migration 007: Add question_generations and llm_interactions tables for server-side tracking.
-        Creates tables for tracking question generation limits and full LLM interaction audit trail.
+        Migration 008: Simplify architecture - add level/source to prompts, drop question_generations.
+        The prompts table now handles all question generation tracking directly.
         """
         try:
             conn = self.db_provider._get_connection()
             cursor = conn.cursor()
             messages = []
             
-            # Check if llm_interactions table exists
+            logger.info("Starting migration 008: Add level/source to prompts, drop question_generations")
+            
+            # Add level column to prompts if not exists
+            cursor.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'prompts' AND column_name = 'level'
+            """)
+            if not cursor.fetchone():
+                cursor.execute("""
+                    ALTER TABLE prompts 
+                    ADD COLUMN level INTEGER DEFAULT NULL
+                """)
+                messages.append("Added level column to prompts table")
+                logger.info("Added level column to prompts")
+            else:
+                messages.append("level column already exists in prompts")
+            
+            # Add source column to prompts if not exists
+            cursor.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'prompts' AND column_name = 'source'
+            """)
+            if not cursor.fetchone():
+                cursor.execute("""
+                    ALTER TABLE prompts 
+                    ADD COLUMN source VARCHAR(50) DEFAULT NULL
+                """)
+                messages.append("Added source column to prompts table")
+                logger.info("Added source column to prompts")
+            else:
+                messages.append("source column already exists in prompts")
+            
+            # Drop question_generations table if it exists (replaced by prompts table)
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'question_generations'
+                )
+            """)
+            qgen_exists = cursor.fetchone()[0]
+            
+            if qgen_exists:
+                cursor.execute("DROP TABLE IF EXISTS question_generations CASCADE")
+                messages.append("Dropped obsolete question_generations table (replaced by prompts)")
+                logger.info("Dropped obsolete question_generations table")
+            else:
+                messages.append("question_generations table does not exist (already removed)")
+            
+            # Drop llm_interactions table if it exists (replaced by enhanced prompts table)
             cursor.execute("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables
@@ -546,84 +585,25 @@ class VercelMigrationManager:
             """)
             llm_exists = cursor.fetchone()[0]
             
-            if not llm_exists:
-                # Create llm_interactions table first (no foreign key dependencies)
-                cursor.execute("""
-                    CREATE TABLE llm_interactions (
-                        id SERIAL PRIMARY KEY,
-                        uid VARCHAR(255) NOT NULL,
-                        request_datetime TIMESTAMP WITH TIME ZONE NOT NULL,
-                        prompt_text TEXT NOT NULL,
-                        response_text TEXT,
-                        model_name VARCHAR(100),
-                        prompt_tokens INTEGER,
-                        completion_tokens INTEGER,
-                        total_tokens INTEGER,
-                        estimated_cost_usd DOUBLE PRECISION,
-                        response_time_ms INTEGER,
-                        status VARCHAR(50) NOT NULL DEFAULT 'success',
-                        error_message TEXT,
-                        CONSTRAINT fk_llm_uid FOREIGN KEY (uid) REFERENCES users(uid) ON DELETE CASCADE
-                    )
-                """)
-                messages.append("Created llm_interactions table")
-                logger.info("Created llm_interactions table")
-                
-                # Create indexes on llm_interactions
-                cursor.execute("CREATE INDEX ix_llm_interactions_uid ON llm_interactions(uid)")
-                cursor.execute("CREATE INDEX ix_llm_interactions_request_datetime ON llm_interactions(request_datetime)")
-                messages.append("Created indexes on llm_interactions table")
-                logger.info("Created indexes on llm_interactions")
+            if llm_exists:
+                cursor.execute("DROP TABLE IF EXISTS llm_interactions CASCADE")
+                messages.append("Dropped obsolete llm_interactions table (replaced by prompts)")
+                logger.info("Dropped obsolete llm_interactions table")
             else:
-                messages.append("llm_interactions table already exists")
+                messages.append("llm_interactions table does not exist (already removed)")
             
-            # Check if question_generations table exists
-            cursor.execute("""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables
-                    WHERE table_name = 'question_generations'
-                )
-            """)
-            gen_exists = cursor.fetchone()[0]
-            
-            if not gen_exists:
-                # Create question_generations table (has foreign key to llm_interactions)
-                cursor.execute("""
-                    CREATE TABLE question_generations (
-                        id SERIAL PRIMARY KEY,
-                        uid VARCHAR(255) NOT NULL,
-                        generation_date DATE NOT NULL,
-                        generation_datetime TIMESTAMP WITH TIME ZONE NOT NULL,
-                        level INTEGER,
-                        source VARCHAR(50) NOT NULL DEFAULT 'api',
-                        llm_interaction_id INTEGER,
-                        CONSTRAINT fk_gen_uid FOREIGN KEY (uid) REFERENCES users(uid) ON DELETE CASCADE,
-                        CONSTRAINT fk_gen_llm FOREIGN KEY (llm_interaction_id) REFERENCES llm_interactions(id) ON DELETE SET NULL
-                    )
-                """)
-                messages.append("Created question_generations table")
-                logger.info("Created question_generations table")
-                
-                # Create indexes on question_generations
-                cursor.execute("CREATE INDEX ix_question_generations_uid ON question_generations(uid)")
-                cursor.execute("CREATE INDEX ix_question_generations_generation_date ON question_generations(generation_date)")
-                messages.append("Created indexes on question_generations table")
-                logger.info("Created indexes on question_generations")
-            else:
-                messages.append("question_generations table already exists")
-            
-            # Update migration version to 007 (or 2d3eefae954c for consistency with Alembic)
+            # Update migration version to 008
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) PRIMARY KEY)
             """)
             cursor.execute("""
-                DELETE FROM alembic_version WHERE version_num = '007'
+                DELETE FROM alembic_version WHERE version_num IN ('008', '007', '2d3eefae954c')
             """)
             cursor.execute("""
-                INSERT INTO alembic_version (version_num) VALUES ('2d3eefae954c')
+                INSERT INTO alembic_version (version_num) VALUES ('008')
                 ON CONFLICT (version_num) DO NOTHING
             """)
-            messages.append("Updated alembic version to 2d3eefae954c")
+            messages.append("Updated alembic version to 008")
             
             conn.commit()
             cursor.close()
@@ -631,11 +611,11 @@ class VercelMigrationManager:
             
             return {
                 'success': True,
-                'message': '; '.join(messages) if messages else 'Question generation tracking already configured'
+                'message': '; '.join(messages) if messages else 'Migration 008 already applied'
             }
             
         except Exception as e:
-            logger.error(f"Error adding question generation tracking migration: {e}")
+            logger.error(f"Error in migration 008: {e}")
             return {
                 'success': False,
                 'error': str(e)

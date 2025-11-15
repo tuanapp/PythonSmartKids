@@ -83,7 +83,9 @@ class PromptService:
         response_time_ms: Optional[int] = None,
         status: str = 'success',
         error_message: Optional[str] = None,
-        is_live: int = 1
+        is_live: int = 1,
+        level: Optional[int] = None,
+        source: Optional[str] = None
     ) -> Optional[int]:
         """
         Record an AI prompt interaction event with full details.
@@ -101,6 +103,8 @@ class PromptService:
             status: Status of the interaction ('success', 'error', 'timeout')
             error_message: Error details if status != 'success'
             is_live: 1=live from app, 0=test call
+            level: Difficulty level for question generation (1-6)
+            source: Source of questions ('api', 'cached', 'fallback')
             
         Returns:
             ID of the created prompt record, or None on error
@@ -118,13 +122,15 @@ class PromptService:
                 INSERT INTO prompts 
                 (uid, request_type, request_text, response_text, model_name,
                  prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd,
-                 response_time_ms, status, error_message, is_live, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 response_time_ms, status, error_message, is_live, created_at,
+                 level, source)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """, (
                 uid, request_type, request_text, response_text, model_name,
                 prompt_tokens, completion_tokens, total_tokens, estimated_cost,
-                response_time_ms, status, error_message, is_live, now
+                response_time_ms, status, error_message, is_live, now,
+                level, source
             ))
             
             prompt_id = cursor.fetchone()[0]
@@ -300,3 +306,101 @@ class PromptService:
         except Exception as e:
             logger.error(f"Error fetching model usage stats for uid={uid}: {e}")
             return []
+    
+    def get_daily_question_generation_count(
+        self,
+        uid: str,
+        date: Optional[datetime] = None
+    ) -> int:
+        """
+        Get the count of question generations for a specific day.
+        
+        Args:
+            uid: Firebase User UID
+            date: Date to check (defaults to today)
+            
+        Returns:
+            Count of question generations for the day
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Use today if no date provided
+            if date is None:
+                date = datetime.now(UTC)
+            
+            # Query for prompts of type 'question_generation' on the specified date
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM prompts
+                WHERE uid = %s 
+                  AND request_type = 'question_generation'
+                  AND DATE(created_at) = DATE(%s)
+            """, (uid, date))
+            
+            count = cursor.fetchone()[0]
+            
+            cursor.close()
+            conn.close()
+            
+            return count
+            
+        except Exception as e:
+            logger.error(f"Error fetching daily question count for uid={uid}: {e}")
+            return 0
+    
+    def can_generate_questions(
+        self,
+        uid: str,
+        subscription: int,
+        max_daily_questions: int = 2
+    ) -> Dict[str, Any]:
+        """
+        Check if a user can generate more questions based on subscription and daily limit.
+        
+        Args:
+            uid: Firebase User UID
+            subscription: User's subscription level (0=free, 1=trial, 2+=premium)
+            max_daily_questions: Maximum allowed generations per day for free/trial users
+            
+        Returns:
+            Dictionary with:
+                - can_generate: bool - Whether user can generate questions
+                - reason: str - Explanation
+                - current_count: int - Current daily count
+                - max_count: int or None - Max allowed (None for premium)
+                - is_premium: bool - Whether user has premium
+        """
+        # Premium users (subscription >= 2) have unlimited access
+        is_premium = subscription >= 2
+        
+        if is_premium:
+            return {
+                'can_generate': True,
+                'reason': 'Premium user - unlimited access',
+                'current_count': 0,  # Don't count for premium
+                'max_count': None,
+                'is_premium': True
+            }
+        
+        # For free/trial users, check daily limit
+        current_count = self.get_daily_question_generation_count(uid)
+        
+        if current_count >= max_daily_questions:
+            return {
+                'can_generate': False,
+                'reason': f'Daily limit reached ({current_count}/{max_daily_questions})',
+                'current_count': current_count,
+                'max_count': max_daily_questions,
+                'is_premium': False
+            }
+        
+        return {
+            'can_generate': True,
+            'reason': f'Within daily limit ({current_count}/{max_daily_questions})',
+            'current_count': current_count,
+            'max_count': max_daily_questions,
+            'is_premium': False
+        }
+

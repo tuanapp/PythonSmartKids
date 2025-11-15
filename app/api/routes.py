@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from app.models.schemas import MathAttempt, GenerateQuestionsRequest, UserRegistration
 from app.services import ai_service
 from app.services.ai_service import generate_practice_questions
-from app.services.question_generation_service import QuestionGenerationService
+from app.services.prompt_service import PromptService
 from app.services.user_blocking_service import UserBlockingService
 from app.repositories import db_service
 from app.db.vercel_migrations import migration_manager
@@ -254,13 +254,13 @@ async def generate_questions(request: GenerateQuestionsRequest):
     """
     Generate a new set of practice questions based on the student's previous performance.
     Enforces subscription-based daily limits: free/trial users = 2/day, premium = unlimited.
-    Tracks question generations and LLM interactions in the database.
+    Tracks all question generations in the prompts table.
     Optionally filter patterns by difficulty level.
     """
     logger.debug(f"Received generate-questions request for uid: {request.uid}, level: {request.level}, is_live: {request.is_live}")
     
-    # Initialize question generation service
-    question_gen_service = QuestionGenerationService()
+    # Initialize prompt service for daily limit checking
+    prompt_service = PromptService()
     
     try:
         # Get user data to check subscription level
@@ -272,7 +272,7 @@ async def generate_questions(request: GenerateQuestionsRequest):
         logger.info(f"User {request.uid} subscription level: {subscription}")
         
         # Check if user can generate questions based on subscription and daily limit
-        limit_check = question_gen_service.can_generate_questions(
+        limit_check = prompt_service.can_generate_questions(
             uid=request.uid,
             subscription=subscription,
             max_daily_questions=2  # Free and trial users limited to 2/day
@@ -317,33 +317,16 @@ async def generate_questions(request: GenerateQuestionsRequest):
         )
         logger.debug("Generated new questions successfully")
         
-        # Determine source of questions
-        source = 'api'  # Default assumption
-        if 'message' in questions_response:
-            if 'failed' in questions_response['message'].lower():
-                source = 'fallback'
-            elif 'cached' in questions_response['message'].lower():
-                source = 'cached'
+        # The prompt is already recorded in the prompts table by ai_service
+        # No need for separate question_generations table
+        prompt_id = questions_response.get('prompt_id')
         
-        # Record the question generation event
-        prompt_id = questions_response.get('prompt_id')  # May be None for fallback
-        generation_id = question_gen_service.record_generation(
-            uid=request.uid,
-            level=request.level,
-            source=source,
-            prompt_id=prompt_id
-        )
-        
-        logger.info(f"Recorded generation event: id={generation_id}, source={source}, prompt_id={prompt_id}")
-        
-        # Add generation tracking info to response
-        questions_response['generation_id'] = generation_id
-        questions_response['source'] = source
+        # Add tracking info to response (updated count after this generation)
         questions_response['daily_count'] = limit_check['current_count'] + 1  # After this generation
         questions_response['daily_limit'] = limit_check['max_count']
         questions_response['is_premium'] = limit_check['is_premium']
         
-        # Save the prompt and response to database (legacy prompts table)
+        # Save the prompt and response to database (legacy prompts table) - SKIP, already done
         try:
             prompt_request = questions_response.get('ai_request', '')
             prompt_response = questions_response.get('ai_response', '')
@@ -352,12 +335,14 @@ async def generate_questions(request: GenerateQuestionsRequest):
             logger.debug(f"Response keys: {list(questions_response.keys())}")
             
             if prompt_request and prompt_response:
-                db_service.save_prompt(
-                    uid=request.uid,
-                    request_text=prompt_request,
-                    response_text=prompt_response,
-                    is_live=request.is_live
-                )
+                # Skip saving - already saved by PromptService in ai_service
+                logger.debug("Prompt already saved by PromptService, skipping legacy save")
+                # db_service.save_prompt(
+                #     uid=request.uid,
+                #     request_text=prompt_request,
+                #     response_text=prompt_response,
+                #     is_live=request.is_live
+                # )
                 logger.debug(f"Saved prompt to database for uid: {request.uid}, is_live: {request.is_live}")
             else:
                 logger.warning(f"Could not save prompt: missing request or response text (request={len(prompt_request) if prompt_request else 0} chars, response={len(prompt_response) if prompt_response else 0} chars)")

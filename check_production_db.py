@@ -40,12 +40,6 @@ def check_production_db():
         print("   ❌ question_generations NOT FOUND")
         print("      → Migration hasn't been applied yet!")
     
-    if 'llm_interactions' in tables:
-        print("   ⚠️  llm_interactions exists (SHOULD BE REMOVED)")
-        cursor.execute("SELECT COUNT(*) FROM llm_interactions")
-        count = cursor.fetchone()[0]
-        print(f"      Records: {count}")
-    
     # Check prompts table structure
     print("\n📝 Prompts Table Structure:")
     cursor.execute("""

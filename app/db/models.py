@@ -46,6 +46,10 @@ class Prompt(Base):
     request_text = Column(Text, nullable=False)  # The prompt sent to AI (legacy name for compatibility)
     model_name = Column(String(100), nullable=True)  # AI model used
     
+    # Question generation specific fields
+    level = Column(Integer, nullable=True)  # Difficulty level (1-6) for question generation
+    source = Column(String(50), nullable=True)  # Source of questions: 'api', 'cached', 'fallback'
+    
     # Response details
     response_text = Column(Text, nullable=True)  # The response from AI (nullable for errors)
     response_time_ms = Column(Integer, nullable=True)  # Response time in milliseconds
@@ -62,11 +66,10 @@ class Prompt(Base):
     
     # Metadata
     is_live = Column(Integer, default=1, nullable=False)  # 1=live from app, 0=test call
-    created_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, index=True)  # Index for daily queries
     
     # Relationships
     user = relationship("User", back_populates="prompts")
-    question_generation = relationship("QuestionGeneration", back_populates="prompt", uselist=False)
 
 class User(Base):
     """SQLAlchemy model for users."""
@@ -89,7 +92,6 @@ class User(Base):
     
     # Relationships
     prompts = relationship("Prompt", back_populates="user", cascade="all, delete-orphan")
-    question_generations = relationship("QuestionGeneration", back_populates="user", cascade="all, delete-orphan")
 
 class UserBlockingHistory(Base):
     """SQLAlchemy model for user blocking history."""
@@ -103,22 +105,6 @@ class UserBlockingHistory(Base):
     blocked_by = Column(String, nullable=True)
     unblocked_at = Column(DateTime(timezone=True), nullable=True)
     notes = Column(Text, nullable=True)
-
-class QuestionGeneration(Base):
-    """SQLAlchemy model for tracking question generation events."""
-    __tablename__ = "question_generations"
-
-    id = Column(Integer, primary_key=True)
-    uid = Column(String, ForeignKey('users.uid', ondelete='CASCADE'), nullable=False, index=True)  # Firebase User UID
-    generation_date = Column(Date, nullable=False, index=True)  # Date only (for daily counting)
-    generation_datetime = Column(DateTime(timezone=True), nullable=False)  # Full timestamp
-    level = Column(Integer, nullable=True)  # Difficulty level requested (1-6)
-    source = Column(String(50), default='api', nullable=False)  # 'api', 'cached', 'fallback'
-    prompt_id = Column(Integer, ForeignKey('prompts.id', ondelete='SET NULL'), nullable=True)  # Link to prompt/LLM call
-    
-    # Relationships
-    user = relationship("User", back_populates="question_generations")
-    prompt = relationship("Prompt", back_populates="question_generation")
 
 def get_engine():
     """Get a SQLAlchemy engine instance."""

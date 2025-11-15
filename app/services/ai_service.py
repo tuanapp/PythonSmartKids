@@ -369,7 +369,9 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
                 response_time_ms=response_time_ms,
                 status='success',
                 error_message=None,
-                is_live=1
+                is_live=1,
+                level=level,
+                source='api'
             )
             
             return {
@@ -411,7 +413,9 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
                 response_time_ms=response_time_ms,
                 status=status,
                 error_message=error_message,
-                is_live=1
+                is_live=1,
+                level=level,
+                source='api'
             )
             
             logger.error("AI response validation failed, using fallback questions")
@@ -456,7 +460,9 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
             response_time_ms=response_time_ms,
             status=status,
             error_message=error_message,
-            is_live=1
+            is_live=1,
+            level=level,
+            source='fallback'
         )
         
         logger.error(f"JSON decode error: {str(je)}")
@@ -490,7 +496,9 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
             response_time_ms=response_time_ms,
             status=status,
             error_message=error_message,
-            is_live=1
+            is_live=1,
+            level=level,
+            source='fallback'
         )
         
         logger.error(f"Error generating questions with AI: {str(e)}")
