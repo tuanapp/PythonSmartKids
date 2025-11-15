@@ -1,5 +1,6 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, create_engine
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, create_engine, ForeignKey, Float, Date
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 import uuid
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -62,6 +63,10 @@ class User(Base):
     blocked_reason = Column(Text, nullable=True)
     blocked_at = Column(DateTime(timezone=True), nullable=True)
     blocked_by = Column(String, nullable=True)
+    
+    # Relationships
+    question_generations = relationship("QuestionGeneration", back_populates="user", cascade="all, delete-orphan")
+    llm_interactions = relationship("LLMInteraction", back_populates="user", cascade="all, delete-orphan")
 
 class UserBlockingHistory(Base):
     """SQLAlchemy model for user blocking history."""
@@ -75,6 +80,44 @@ class UserBlockingHistory(Base):
     blocked_by = Column(String, nullable=True)
     unblocked_at = Column(DateTime(timezone=True), nullable=True)
     notes = Column(Text, nullable=True)
+
+class QuestionGeneration(Base):
+    """SQLAlchemy model for tracking question generation events."""
+    __tablename__ = "question_generations"
+
+    id = Column(Integer, primary_key=True)
+    uid = Column(String, ForeignKey('users.uid', ondelete='CASCADE'), nullable=False, index=True)  # Firebase User UID
+    generation_date = Column(Date, nullable=False, index=True)  # Date only (for daily counting)
+    generation_datetime = Column(DateTime(timezone=True), nullable=False)  # Full timestamp
+    level = Column(Integer, nullable=True)  # Difficulty level requested (1-6)
+    source = Column(String(50), default='api', nullable=False)  # 'api', 'cached', 'fallback'
+    llm_interaction_id = Column(Integer, ForeignKey('llm_interactions.id', ondelete='SET NULL'), nullable=True)  # Link to LLM call
+    
+    # Relationships
+    user = relationship("User", back_populates="question_generations")
+    llm_interaction = relationship("LLMInteraction", back_populates="question_generation")
+
+class LLMInteraction(Base):
+    """SQLAlchemy model for tracking LLM API interactions."""
+    __tablename__ = "llm_interactions"
+
+    id = Column(Integer, primary_key=True)
+    uid = Column(String, ForeignKey('users.uid', ondelete='CASCADE'), nullable=False, index=True)  # Firebase User UID
+    request_datetime = Column(DateTime(timezone=True), nullable=False, index=True)
+    prompt_text = Column(Text, nullable=False)  # The full prompt sent to LLM
+    response_text = Column(Text, nullable=True)  # The full response from LLM (nullable in case of errors)
+    model_name = Column(String(100), nullable=True)  # e.g., 'gpt-4', 'gpt-3.5-turbo'
+    prompt_tokens = Column(Integer, nullable=True)  # Token count for prompt
+    completion_tokens = Column(Integer, nullable=True)  # Token count for response
+    total_tokens = Column(Integer, nullable=True)  # Total tokens used
+    estimated_cost_usd = Column(Float, nullable=True)  # Calculated cost in USD
+    response_time_ms = Column(Integer, nullable=True)  # Response time in milliseconds
+    status = Column(String(50), default='success', nullable=False)  # 'success', 'error', 'timeout'
+    error_message = Column(Text, nullable=True)  # Error details if status != 'success'
+    
+    # Relationships
+    user = relationship("User", back_populates="llm_interactions")
+    question_generation = relationship("QuestionGeneration", back_populates="llm_interaction", uselist=False)
 
 def get_engine():
     """Get a SQLAlchemy engine instance."""

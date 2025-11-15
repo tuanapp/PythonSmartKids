@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from app.models.schemas import MathAttempt, GenerateQuestionsRequest, UserRegistration
 from app.services import ai_service
 from app.services.ai_service import generate_practice_questions
+from app.services.question_generation_service import QuestionGenerationService
 from app.services.user_blocking_service import UserBlockingService
 from app.repositories import db_service
 from app.db.vercel_migrations import migration_manager
@@ -252,11 +253,46 @@ async def analyze_student(uid: str):
 async def generate_questions(request: GenerateQuestionsRequest):
     """
     Generate a new set of practice questions based on the student's previous performance.
+    Enforces subscription-based daily limits: free/trial users = 2/day, premium = unlimited.
+    Tracks question generations and LLM interactions in the database.
     Optionally filter patterns by difficulty level.
-    Saves both the AI prompt request and response to the database.
     """
     logger.debug(f"Received generate-questions request for uid: {request.uid}, level: {request.level}, is_live: {request.is_live}")
+    
+    # Initialize question generation service
+    question_gen_service = QuestionGenerationService()
+    
     try:
+        # Get user data to check subscription level
+        user_data = db_service.get_user_by_uid(request.uid)
+        
+        # Default to free subscription (0) if user not found (should not happen with auth middleware)
+        subscription = user_data.get("subscription", 0) if user_data else 0
+        
+        logger.info(f"User {request.uid} subscription level: {subscription}")
+        
+        # Check if user can generate questions based on subscription and daily limit
+        limit_check = question_gen_service.can_generate_questions(
+            uid=request.uid,
+            subscription=subscription,
+            max_daily_questions=2  # Free and trial users limited to 2/day
+        )
+        
+        if not limit_check['can_generate']:
+            logger.warning(f"User {request.uid} exceeded daily limit: {limit_check['reason']}")
+            raise HTTPException(
+                status_code=403,  # Forbidden
+                detail={
+                    'error': 'daily_limit_exceeded',
+                    'message': limit_check['reason'],
+                    'current_count': limit_check['current_count'],
+                    'max_count': limit_check['max_count'],
+                    'is_premium': limit_check['is_premium']
+                }
+            )
+        
+        logger.info(f"Limit check passed: {limit_check['reason']}")
+        
         # Get student's previous attempts
         attempts = db_service.get_attempts_by_uid(request.uid)
         logger.debug(f"Retrieved {len(attempts)} previous attempts")
@@ -269,17 +305,45 @@ async def generate_questions(request: GenerateQuestionsRequest):
             patterns = db_service.get_question_patterns()
             logger.debug(f"Retrieved {len(patterns)} patterns (all levels)")
 
+        # Generate questions with LLM tracking (uid is now passed)
         questions_response = generate_practice_questions(
-            attempts, 
-            patterns, 
-            request.ai_bridge_base_url,
-            request.ai_bridge_api_key,
-            request.ai_bridge_model,
-            request.level
+            uid=request.uid,  # Pass uid for LLM logging
+            attempts=attempts, 
+            patterns=patterns, 
+            ai_bridge_base_url=request.ai_bridge_base_url,
+            ai_bridge_api_key=request.ai_bridge_api_key,
+            ai_bridge_model=request.ai_bridge_model,
+            level=request.level
         )
         logger.debug("Generated new questions successfully")
         
-        # Save the prompt and response to database
+        # Determine source of questions
+        source = 'api'  # Default assumption
+        if 'message' in questions_response:
+            if 'failed' in questions_response['message'].lower():
+                source = 'fallback'
+            elif 'cached' in questions_response['message'].lower():
+                source = 'cached'
+        
+        # Record the question generation event
+        llm_interaction_id = questions_response.get('llm_interaction_id')  # May be None for fallback
+        generation_id = question_gen_service.record_generation(
+            uid=request.uid,
+            level=request.level,
+            source=source,
+            llm_interaction_id=llm_interaction_id
+        )
+        
+        logger.info(f"Recorded generation event: id={generation_id}, source={source}, llm_id={llm_interaction_id}")
+        
+        # Add generation tracking info to response
+        questions_response['generation_id'] = generation_id
+        questions_response['source'] = source
+        questions_response['daily_count'] = limit_check['current_count'] + 1  # After this generation
+        questions_response['daily_limit'] = limit_check['max_count']
+        questions_response['is_premium'] = limit_check['is_premium']
+        
+        # Save the prompt and response to database (legacy prompts table)
         try:
             prompt_request = questions_response.get('ai_request', '')
             prompt_response = questions_response.get('ai_response', '')
@@ -302,6 +366,9 @@ async def generate_questions(request: GenerateQuestionsRequest):
             logger.error(f"Error saving prompt to database: {prompt_error}")
 
         return questions_response
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 403 for limit exceeded)
+        raise
     except Exception as e:
         logger.error(f"Error generating questions: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

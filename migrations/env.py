@@ -16,16 +16,12 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 config = context.config
 
 # Import and configure the database URL
-from app.config import DATABASE_URL, DATABASE_PROVIDER, NEON_DBNAME, NEON_USER, NEON_PASSWORD, NEON_HOST, NEON_SSLMODE
+from app.config import DATABASE_URL, NEON_DBNAME, NEON_USER, NEON_PASSWORD, NEON_HOST, NEON_SSLMODE
 
-# Configure the database URL based on the provider
-if DATABASE_PROVIDER == 'neon':
-    # Create PostgreSQL connection string for Neon
-    neon_url = f"postgresql://{NEON_USER}:{NEON_PASSWORD}@{NEON_HOST}/{NEON_DBNAME}?sslmode={NEON_SSLMODE}"
-    config.set_main_option('sqlalchemy.url', neon_url)
-else:
-    # For SQLite or other direct database connections
-    config.set_main_option('sqlalchemy.url', DATABASE_URL)
+# Create PostgreSQL connection string for Neon
+# We always use PostgreSQL now (no DATABASE_PROVIDER check needed)
+neon_url = f"postgresql://{NEON_USER}:{NEON_PASSWORD}@{NEON_HOST}/{NEON_DBNAME}?sslmode={NEON_SSLMODE}"
+config.set_main_option('sqlalchemy.url', neon_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

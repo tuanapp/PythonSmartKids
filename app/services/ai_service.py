@@ -2,9 +2,11 @@ import json
 from openai import OpenAI
 from app.config import AI_BRIDGE_BASE_URL, AI_BRIDGE_API_KEY, AI_BRIDGE_MODEL, HTTP_REFERER, APP_TITLE, MAX_ATTEMPTS_HISTORY_LIMIT
 from app.validators.response_validator import OpenAIResponseValidator
+from app.services.llm_interaction_service import LLMInteractionService
 import random
 from datetime import datetime, timedelta
 import logging
+import time
 
 current_response_text = ""
 logger = logging.getLogger(__name__)
@@ -103,10 +105,26 @@ def analyze_attempts(attempts):
     
     return weak_areas, number_ranges
 
-def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_bridge_api_key=None, ai_bridge_model=None, level=None):
+def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None, ai_bridge_api_key=None, ai_bridge_model=None, level=None):
     """
     Generate questions using AI, focusing on student's weak areas based on their attempt history.
+    
+    Args:
+        uid: Firebase User UID for tracking LLM interactions
+        attempts: List of student attempts
+        patterns: List of question patterns
+        ai_bridge_base_url: Optional custom AI bridge URL
+        ai_bridge_api_key: Optional custom AI API key
+        ai_bridge_model: Optional custom AI model name
+        level: Optional difficulty level
+        
+    Returns:
+        Dictionary with questions and metadata, including llm_interaction_id for tracking
     """
+    # Initialize LLM interaction service
+    llm_service = LLMInteractionService()
+    llm_interaction_id = None
+    
     # Prepare data for the AI by categorizing attempts
     weak_areas = []
     strong_areas = []
@@ -256,13 +274,24 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
     if is_new_user:
         logger.info(f"Generating questions for NEW USER - Patterns: {len(patterns)}")
     else:
-        logger.debug(f"Prompt context - Weak areas: {len(weak_areas)}, Strong areas: {len(strong_areas)}, Patterns: {len(patterns)}")    # Start timing the API call
-    api_start_time = datetime.now()
-    response_time = None
+        logger.debug(f"Prompt context - Weak areas: {len(weak_areas)}, Strong areas: {len(strong_areas)}, Patterns: {len(patterns)}")    
+    
+    # Start timing the API call
+    api_start_time_ms = int(time.time() * 1000)  # Milliseconds
+    response_time_ms = None
     
     # Initialize global variable to avoid UnboundLocalError
     global current_response_text
     current_response_text = ""
+    
+    # Variables for LLM logging
+    model_name = None
+    prompt_tokens = None
+    completion_tokens = None
+    total_tokens = None
+    status = 'success'
+    error_message = None
+    prompt_text = ""
     
     try:
         
@@ -270,6 +299,7 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
         api_key = ai_bridge_api_key or AI_BRIDGE_API_KEY
         base_url = ai_bridge_base_url or AI_BRIDGE_BASE_URL
         model = ai_bridge_model or AI_BRIDGE_MODEL
+        model_name = model  # Save for logging
         
         # Create a new client with the specified configuration
         api_client = OpenAI(
@@ -283,20 +313,27 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
         
         logger.debug(f"Using AI Bridge config - Model: {model}, Base URL: {base_url}")
         
+        # Save prompt text for logging
+        prompt_text = prompt['content']
+        
         completion = api_client.chat.completions.create(
             model=model,
             messages=[prompt]
         )
         
-        # Calculate response time
-        api_end_time = datetime.now()
-        response_time = (api_end_time - api_start_time).total_seconds()        # Extract and parse the response
+        # Calculate response time in milliseconds
+        api_end_time_ms = int(time.time() * 1000)
+        response_time_ms = api_end_time_ms - api_start_time_ms
+        
+        # Extract and parse the response
         response_text = completion.choices[0].message.content
         
-        
-        #manual mock
-        #response_text = '[\n    {\n        "number": 1,\n        "topic": "algebra",\n        "pattern": "a + _ = b",\n        "question": "700 + _ = 900",\n        "answer": "200"\n    },\n    {\n        "number": 2,\n        "topic": "algebra",\n        "pattern": "a - _ = b",\n        "question": "999 - _ = 300",\n        "answer": "699"\n    },\n    {\n        "number": 3,\n        "topic": "algebra",\n        "pattern": "a + b = _",\n        "question": "999 + 999 = _",\n        "answer": "1998"\n    },\n    {\n        "number": 4,\n        "topic": "algebra",\n        "pattern": "a / b = _",\n        "question": "999 / 3 = _",\n        "answer": "333"\n    }\n]'
-        #response_text = "```\n[\n  {\n    \"1\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a + _ = b\",\n      \"question\": \"743 + _ = 946\",\n      \"answer\": \"203\"\n    }\n  },\n  {\n    \"2\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a - _ = b\",\n      \"question\": \"1886 - _ = 932\",\n      \"answer\": \"954\"\n    }\n  },\n  {\n    \"3\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a * b = _\",\n      \"question\": \"1593 * _ = 531\",\n      \"answer\": \"3\"\n    }\n  },\n  {\n    \"4\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a + b = _\",\n      \"question\": \"736 + 433 = _\",\n      \"answer\": \"1169\"\n    }\n  },\n  {\n    \"5\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a / b = _\",\n      \"question\": \"890 / _ = 89\",\n      \"answer\": \"10\"\n    }\n  },\n  {\n    \"6\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a * b = _\",\n      \"question\": \"1871 * _ = 18710\",\n      \"answer\": \"10\"\n    }\n  },\n  {\n    \"7\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a / b = _\",\n      \"question\": \"21 / _ = 7\",\n      \"answer\": \"3\"\n    }\n  },\n  {\n    \"8\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a * b = _\",\n      \"question\": \"407 * _ = 1221\",\n      \"answer\": \"3\"\n    }\n  },\n  {\n    \"9\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a * b = _\",\n      \"question\": \"74 * _ = 296\",\n      \"answer\": \"4\"\n    }\n  },\n  {\n    \"10\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a - b = _\",\n      \"question\": \"848 - _ = 717\",\n      \"answer\": \"131\"\n    }\n  },\n  {\n    \"11\": {\n      \"topic\": \"algebra\",\n      \"pattern\": \"a + b = _\",\n      \"question\": \"500 + 300 = _\",\n      \"answer\": \"800\"\n    }\n  }\n]\n```"
+        # Extract token usage from completion (if available)
+        if hasattr(completion, 'usage') and completion.usage:
+            prompt_tokens = completion.usage.prompt_tokens
+            completion_tokens = completion.usage.completion_tokens
+            total_tokens = completion.usage.total_tokens
+            logger.debug(f"Token usage - Prompt: {prompt_tokens}, Completion: {completion_tokens}, Total: {total_tokens}")
         
         current_response_text = response_text
         
@@ -317,7 +354,21 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
         if validation_result['is_valid']:
             questions = validation_result['questions']
             logger.debug(f"Successfully validated {len(questions)} questions")
-            logger.debug(f"AI Bridge API response time: {response_time:.2f} seconds")
+            logger.debug(f"AI Bridge API response time: {response_time_ms}ms")
+            
+            # Log LLM interaction (success case)
+            llm_interaction_id = llm_service.record_interaction(
+                uid=uid,
+                prompt_text=prompt_text,
+                response_text=current_response_text,
+                model_name=model_name,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                response_time_ms=response_time_ms,
+                status='success',
+                error_message=None
+            )
             
             return {
                 'questions': questions,
@@ -325,7 +376,8 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
                 'message': "Success",
                 'ai_response': current_response_text,
                 'ai_request': prompt['content'],  # Include the prompt text
-                'response_time': response_time,
+                'response_time': response_time_ms / 1000.0,  # Convert to seconds for backward compatibility
+                'llm_interaction_id': llm_interaction_id,  # Add LLM interaction ID
                 'validation_result': {
                     'is_valid': validation_result['is_valid'],
                     'is_partial': validation_result.get('is_partial', False),
@@ -340,12 +392,29 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
                 }
             }
         else:
-            # If validation fails, fall back to fallback questions but include validation info
+            # If validation fails, log as error and fall back to fallback questions
+            status = 'error'
+            error_message = f"Validation failed: {'; '.join(validation_result['errors'][:3])}"
+            
+            # Log LLM interaction (validation failure)
+            llm_interaction_id = llm_service.record_interaction(
+                uid=uid,
+                prompt_text=prompt_text,
+                response_text=current_response_text,
+                model_name=model_name,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                response_time_ms=response_time_ms,
+                status=status,
+                error_message=error_message
+            )
+            
             logger.error("AI response validation failed, using fallback questions")
             fallback_result = generate_fallback_questions(
-                f"Validation failed: {'; '.join(validation_result['errors'][:3])}", 
+                error_message, 
                 current_response_text, 
-                response_time,
+                response_time_ms / 1000.0,  # Convert to seconds
                 attempts,
                 level,
                 prompt['content']  # Pass the prompt text
@@ -359,29 +428,75 @@ def generate_practice_questions(attempts, patterns, ai_bridge_base_url=None, ai_
                 'is_new_user': is_new_user,
                 'user_type': 'new_user' if is_new_user else 'returning_user'
             }
+            fallback_result['llm_interaction_id'] = llm_interaction_id  # Add LLM interaction ID
             return fallback_result
     except json.JSONDecodeError as je:
         # Calculate response time even on error
-        if response_time is None:
-            api_end_time = datetime.now()
-            response_time = (api_end_time - api_start_time).total_seconds()
+        if response_time_ms is None:
+            api_end_time_ms = int(time.time() * 1000)
+            response_time_ms = api_end_time_ms - api_start_time_ms
+        
+        status = 'error'
+        error_message = f"JSON decode error: {str(je)}"
+        
+        # Log LLM interaction (JSON error)
+        llm_interaction_id = llm_service.record_interaction(
+            uid=uid,
+            prompt_text=prompt_text,
+            response_text=current_response_text,
+            model_name=model_name,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            response_time_ms=response_time_ms,
+            status=status,
+            error_message=error_message
+        )
         
         logger.error(f"JSON decode error: {str(je)}")
-        logger.error(f"AI Bridge API response time: {response_time:.2f} seconds")
-        return generate_fallback_questions(str(je), current_response_text, response_time, attempts, level, prompt['content'])
+        logger.error(f"AI Bridge API response time: {response_time_ms}ms")
+        
+        fallback_result = generate_fallback_questions(
+            str(je), current_response_text, response_time_ms / 1000.0, attempts, level, prompt_text
+        )
+        fallback_result['llm_interaction_id'] = llm_interaction_id
+        return fallback_result
+        
     except Exception as e:
         # Calculate response time even on error
-        if response_time is None:
-            api_end_time = datetime.now()
-            response_time = (api_end_time - api_start_time).total_seconds()
+        if response_time_ms is None:
+            api_end_time_ms = int(time.time() * 1000)
+            response_time_ms = api_end_time_ms - api_start_time_ms
+        
+        status = 'error'
+        error_message = f"Exception: {str(e)}"
+        
+        # Log LLM interaction (general error)
+        llm_interaction_id = llm_service.record_interaction(
+            uid=uid,
+            prompt_text=prompt_text if prompt_text else "Error before prompt creation",
+            response_text=current_response_text,
+            model_name=model_name,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            response_time_ms=response_time_ms,
+            status=status,
+            error_message=error_message
+        )
         
         logger.error(f"Error generating questions with AI: {str(e)}")
         api_key = ai_bridge_api_key or AI_BRIDGE_API_KEY
         base_url = ai_bridge_base_url or AI_BRIDGE_BASE_URL
         model = ai_bridge_model or AI_BRIDGE_MODEL
         logger.error(f"ai client info : {model} {api_key} {base_url}")
-        logger.error(f"AI Bridge API response time: {response_time:.2f} seconds")
-        return generate_fallback_questions(str(e), current_response_text, response_time, attempts, level, prompt['content'])
+        logger.error(f"AI Bridge API response time: {response_time_ms}ms")
+        
+        fallback_result = generate_fallback_questions(
+            str(e), current_response_text, response_time_ms / 1000.0, attempts, level, prompt_text if prompt_text else ""
+        )
+        fallback_result['llm_interaction_id'] = llm_interaction_id
+        return fallback_result
 
 def generate_fallback_questions(error_message="Unknown error occurred", current_response_text="", response_time=None, attempts=None, level=None, prompt_text=""):
     """Generate basic questions as a fallback if AI fails"""
