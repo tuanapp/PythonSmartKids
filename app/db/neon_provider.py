@@ -118,7 +118,7 @@ class NeonProvider(DatabaseProvider):
                 )
             """)
             
-            # Create prompts table if it doesn't exist
+            # Create prompts table if it doesn't exist (with all columns from Migration 008)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS prompts (
                     id SERIAL PRIMARY KEY,
@@ -126,7 +126,18 @@ class NeonProvider(DatabaseProvider):
                     request_text TEXT NOT NULL,
                     response_text TEXT NOT NULL,
                     is_live INTEGER DEFAULT 1 NOT NULL,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    request_type VARCHAR(50) DEFAULT NULL,
+                    model_name VARCHAR(100) DEFAULT NULL,
+                    response_time_ms INTEGER DEFAULT NULL,
+                    prompt_tokens INTEGER DEFAULT NULL,
+                    completion_tokens INTEGER DEFAULT NULL,
+                    total_tokens INTEGER DEFAULT NULL,
+                    estimated_cost_usd DOUBLE PRECISION DEFAULT NULL,
+                    status VARCHAR(50) DEFAULT NULL,
+                    error_message TEXT DEFAULT NULL,
+                    level INTEGER DEFAULT NULL,
+                    source VARCHAR(50) DEFAULT NULL
                 )
             """)
             

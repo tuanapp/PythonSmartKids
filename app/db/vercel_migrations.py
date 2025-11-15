@@ -518,7 +518,7 @@ class VercelMigrationManager:
     
     def add_question_generation_tracking_migration(self) -> Dict[str, Any]:
         """
-        Migration 008: Simplify architecture - add level/source to prompts, drop question_generations.
+        Migration 008: Simplify architecture - add all tracking columns to prompts, drop question_generations.
         The prompts table now handles all question generation tracking directly.
         """
         try:
@@ -526,39 +526,42 @@ class VercelMigrationManager:
             cursor = conn.cursor()
             messages = []
             
-            logger.info("Starting migration 008: Add level/source to prompts, drop question_generations")
+            logger.info("Starting migration 008: Add tracking columns to prompts, drop question_generations")
             
-            # Add level column to prompts if not exists
+            # Define all columns that should exist in prompts table (from Migration 008)
+            required_columns = [
+                ('request_type', 'VARCHAR(50) DEFAULT NULL'),
+                ('model_name', 'VARCHAR(100) DEFAULT NULL'),
+                ('response_time_ms', 'INTEGER DEFAULT NULL'),
+                ('prompt_tokens', 'INTEGER DEFAULT NULL'),
+                ('completion_tokens', 'INTEGER DEFAULT NULL'),
+                ('total_tokens', 'INTEGER DEFAULT NULL'),
+                ('estimated_cost_usd', 'DOUBLE PRECISION DEFAULT NULL'),
+                ('status', 'VARCHAR(50) DEFAULT NULL'),
+                ('error_message', 'TEXT DEFAULT NULL'),
+                ('level', 'INTEGER DEFAULT NULL'),
+                ('source', 'VARCHAR(50) DEFAULT NULL')
+            ]
+            
+            # Check which columns exist
             cursor.execute("""
                 SELECT column_name 
                 FROM information_schema.columns 
-                WHERE table_name = 'prompts' AND column_name = 'level'
+                WHERE table_name = 'prompts'
             """)
-            if not cursor.fetchone():
-                cursor.execute("""
-                    ALTER TABLE prompts 
-                    ADD COLUMN level INTEGER DEFAULT NULL
-                """)
-                messages.append("Added level column to prompts table")
-                logger.info("Added level column to prompts")
-            else:
-                messages.append("level column already exists in prompts")
+            existing_columns = {row[0] for row in cursor.fetchall()}
             
-            # Add source column to prompts if not exists
-            cursor.execute("""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name = 'prompts' AND column_name = 'source'
-            """)
-            if not cursor.fetchone():
-                cursor.execute("""
-                    ALTER TABLE prompts 
-                    ADD COLUMN source VARCHAR(50) DEFAULT NULL
-                """)
-                messages.append("Added source column to prompts table")
-                logger.info("Added source column to prompts")
-            else:
-                messages.append("source column already exists in prompts")
+            # Add missing columns
+            for col_name, col_definition in required_columns:
+                if col_name not in existing_columns:
+                    cursor.execute(f"""
+                        ALTER TABLE prompts 
+                        ADD COLUMN {col_name} {col_definition}
+                    """)
+                    messages.append(f"Added {col_name} column to prompts table")
+                    logger.info(f"Added {col_name} column to prompts")
+                else:
+                    messages.append(f"{col_name} column already exists in prompts")
             
             # Drop question_generations table if it exists (replaced by prompts table)
             cursor.execute("""
