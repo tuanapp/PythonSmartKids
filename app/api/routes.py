@@ -425,20 +425,42 @@ async def apply_migrations(admin_key: str = ""):
 
 @router.get("/debug/daily-count/{uid}")
 async def debug_daily_count(uid: str):
-    """Debug endpoint to check daily question count"""
+    """Debug endpoint to check daily question count and prompts table schema"""
     try:
         prompt_service = PromptService()
-        count = prompt_service.get_daily_question_generation_count(uid)
         
-        # Also get raw data
+        # Get the database connection
         db = DatabaseFactory.get_provider()
         conn = db._get_connection()
         cursor = conn.cursor()
         
+        # First, check what columns exist in the prompts table
         cursor.execute("""
-            SELECT id, created_at, request_type, status, is_live, level, source
+            SELECT column_name, data_type 
+            FROM information_schema.columns 
+            WHERE table_name = 'prompts'
+            ORDER BY ordinal_position
+        """)
+        columns = [{'name': row[0], 'type': row[1]} for row in cursor.fetchall()]
+        
+        # Check if question_generations table exists
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_name = 'question_generations'
+            )
+        """)
+        question_generations_exists = cursor.fetchone()[0]
+        
+        # Count total prompts for this UID
+        cursor.execute("SELECT COUNT(*) FROM prompts WHERE uid = %s", (uid,))
+        total_count = cursor.fetchone()[0]
+        
+        # Get recent prompts with only guaranteed columns
+        cursor.execute("""
+            SELECT id, created_at, status, is_live
             FROM prompts
-            WHERE uid = %s AND request_type = 'question_generation'
+            WHERE uid = %s
             ORDER BY created_at DESC
             LIMIT 10
         """, (uid,))
@@ -448,21 +470,31 @@ async def debug_daily_count(uid: str):
             recent_prompts.append({
                 'id': row[0],
                 'created_at': str(row[1]),
-                'request_type': row[2],
-                'status': row[3],
-                'is_live': row[4],
-                'level': row[5],
-                'source': row[6]
+                'status': row[2],
+                'is_live': row[3]
             })
+        
+        # Try to get daily count using the service
+        try:
+            daily_count = prompt_service.get_daily_question_generation_count(uid)
+        except Exception as e:
+            daily_count = f"Error: {str(e)}"
         
         cursor.close()
         conn.close()
         
         return {
             'uid': uid,
-            'daily_count': count,
-            'recent_prompts': recent_prompts,
-            'total_prompts': len(recent_prompts)
+            'migration_status': {
+                'question_generations_table_exists': question_generations_exists,
+                'prompts_columns': columns,
+                'migration_008_applied': not question_generations_exists  # If question_generations is gone, migration is applied
+            },
+            'counts': {
+                'total_prompts': total_count,
+                'daily_count': daily_count
+            },
+            'recent_prompts': recent_prompts
         }
     except Exception as e:
         logger.error(f"Error in debug endpoint: {e}")
