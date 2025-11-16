@@ -40,11 +40,23 @@ async def register_user(user: UserRegistration):
 
 @router.get("/users/{uid}")
 async def get_user(uid: str):
-    """Get user information including subscription level"""
+    """Get user information including subscription level and daily usage"""
     try:
         user_data = db_service.get_user_by_uid(uid)
         if not user_data:
             raise HTTPException(status_code=404, detail="User not found")
+        
+        # Get subscription level
+        subscription = user_data.get("subscription", 0)
+        
+        # Initialize prompt service to get daily usage
+        prompt_service = PromptService()
+        daily_count = prompt_service.get_daily_question_generation_count(uid)
+        
+        # Determine daily limit based on subscription
+        # Premium users (subscription >= 2) have unlimited access
+        is_premium = subscription >= 2
+        max_daily = None if is_premium else 2  # Free/trial users get 2 per day
         
         return {
             "uid": user_data["uid"],
@@ -52,8 +64,11 @@ async def get_user(uid: str):
             "name": user_data["name"],
             "displayName": user_data["display_name"],
             "gradeLevel": user_data["grade_level"],
-            "subscription": user_data.get("subscription", 0),  # Default to 0 if not set
-            "registrationDate": user_data["registration_date"]
+            "subscription": subscription,
+            "registrationDate": user_data["registration_date"],
+            "daily_count": daily_count,
+            "daily_limit": max_daily,
+            "is_premium": is_premium
         }
     except HTTPException:
         raise
