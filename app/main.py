@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import routes
+from app.api import version as version_routes
 from app.middleware.user_blocking_middleware import UserBlockingMiddleware
 import logging
 
@@ -27,6 +28,7 @@ async def startup_event():
     logger.debug("FastAPI application starting up...")
 
 app.include_router(routes.router)
+app.include_router(version_routes.router)
 
 @app.get("/")
 def root():
