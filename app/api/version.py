@@ -28,8 +28,8 @@ def get_version_config() -> dict:
     """Get version configuration from environment or defaults"""
     return {
         # Latest available version
-        "latest_version_code": int(os.getenv("LATEST_APP_VERSION_CODE", "1017")),
-        "latest_version_name": os.getenv("LATEST_APP_VERSION_NAME", "1.0.0.17"),
+        "latest_version_code": int(os.getenv("LATEST_APP_VERSION_CODE", "1016")),
+        "latest_version_name": os.getenv("LATEST_APP_VERSION_NAME", "1.0.0.16"),
         # Minimum required version (users below this MUST update)
         "minimum_version_code": int(os.getenv("MINIMUM_APP_VERSION_CODE", "1015")),
         "minimum_version_name": os.getenv("MINIMUM_APP_VERSION_NAME", "1.0.0.15"),
