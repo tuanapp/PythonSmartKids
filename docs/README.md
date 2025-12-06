@@ -1,51 +1,63 @@
-# Documentation
+# SmartBoy Backend Documentation
 
-This folder contains all project documentation files organized for better maintainability.
+*Last Updated: December 2025*
 
-## Documentation Structure
+This folder contains all project documentation organized for easy navigation and maintenance.
 
-### 📊 **Database Documentation**
-- [`DATABASE_README.md`](DATABASE_README.md) - Database setup, configuration, and usage guide
-- [`VERCEL_DATABASE_MIGRATION.md`](VERCEL_DATABASE_MIGRATION.md) - **Quick migration guide for Vercel** ⚡
+## 📚 Documentation Index
 
-### 🧪 **Testing Documentation** 
-- [`TEST_ORGANIZATION_PLAN.md`](TEST_ORGANIZATION_PLAN.md) - Test organization planning document
+| Document | Description | Audience |
+|----------|-------------|----------|
+| **[DATABASE.md](DATABASE.md)** | Database setup, schema, migrations | Developers, DevOps |
+| **[DEPLOYMENT.md](DEPLOYMENT.md)** | Vercel deployment & production setup | DevOps, Developers |
+| **[DEVELOPMENT.md](DEVELOPMENT.md)** | Local environment setup & workflow | Developers |
+| **[ARCHITECTURE.md](ARCHITECTURE.md)** | System design & code organization | All team members |
+| **[API_REFERENCE.md](API_REFERENCE.md)** | API endpoints & usage | Frontend devs, Integrators |
+| **[USER_BLOCKING.md](USER_BLOCKING.md)** | User blocking feature documentation | Admins, Developers |
+| **[TESTING.md](TESTING.md)** | Test organization & running tests | Developers |
 
-### 🚀 **Deployment Documentation**
-- [`VERCEL_DEPLOYMENT.md`](VERCEL_DEPLOYMENT.md) - Vercel deployment configuration and setup
+## 🚀 Quick Start
 
-### 🏗️ **Project Structure**
-- [`WORKSPACE_STRUCTURE.md`](WORKSPACE_STRUCTURE.md) - Project workspace organization and structure
+### Local Development
+```powershell
+cd Backend_Python
+.\start-dev.ps1
+```
+Server runs at: http://localhost:8000
 
-## Quick Reference
+### Production
+```bash
+# Deploy to Vercel (auto on push)
+git push origin main
 
-| Document | Purpose | Audience |
-|----------|---------|----------|
-| `DATABASE_README.md` | Database setup and operations | Developers, DevOps |
-| `VERCEL_DATABASE_MIGRATION.md` | **Quick Vercel migration** | DevOps, Developers |
-| `TEST_ORGANIZATION_PLAN.md` | Test migration planning | Developers, Project leads |
-| `VERCEL_DEPLOYMENT.md` | Deployment procedures | DevOps, Developers |
-| `WORKSPACE_STRUCTURE.md` | Project architecture | New developers, Contributors |
+# Apply migrations
+curl -X POST "https://python-smart-kids.vercel.app/admin/apply-migrations?admin_key=YOUR_KEY"
+```
 
-## Related Documentation
+## 🔗 Key Links
 
-- [`../README.md`](../README.md) - Main project README (stays in root)
-- [`../tests/README.md`](../tests/README.md) - Test-specific documentation  
-- [`../tests/manual/README.md`](../tests/manual/README.md) - Manual testing guide
+- **Production API**: https://python-smart-kids.vercel.app
+- **API Docs (Swagger)**: http://localhost:8000/docs (local) 
+- **Database**: Neon PostgreSQL (cloud)
+- **Deployment**: Vercel
 
-## Documentation Guidelines
+## 📁 Related Documentation
 
-When adding new documentation:
+| Location | Purpose |
+|----------|---------|
+| [`../README.md`](../README.md) | Main project README |
+| [`../tests/README.md`](../tests/README.md) | Test suite documentation |
+| [`../tests/TEST_SUITE_DOCUMENTATION.md`](../tests/TEST_SUITE_DOCUMENTATION.md) | Detailed test documentation |
 
-1. **Place in appropriate category** - Add to existing sections or create new ones
-2. **Update this README** - Add entries to the table above
-3. **Use clear naming** - Follow existing naming conventions
-4. **Link appropriately** - Reference related docs and main README
+## 📋 Documentation Guidelines
 
-## Benefits of This Organization
+When updating documentation:
 
-✅ **Centralized** - All documentation in one place  
-✅ **Categorized** - Easy to find specific types of docs  
-✅ **Maintainable** - Clear structure for adding new documentation  
-✅ **Professional** - Standard practice for project organization  
-✅ **Accessible** - Related docs stay in context (tests/, etc.)
+1. **Keep docs current** - Update when code changes
+2. **Use clear naming** - Follow existing conventions
+3. **Link appropriately** - Cross-reference related docs
+4. **Include examples** - Show actual usage with code snippets
+
+---
+
+*See individual documentation files for detailed information.*
