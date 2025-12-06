@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, create_engine, ForeignKey, Float, Date
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, create_engine, ForeignKey, Float, Date, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import uuid
@@ -89,6 +89,10 @@ class User(Base):
     blocked_reason = Column(Text, nullable=True)
     blocked_at = Column(DateTime(timezone=True), nullable=True)
     blocked_by = Column(String, nullable=True)
+    
+    # Timestamps (auto-managed by database)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     # Relationships
     prompts = relationship("Prompt", back_populates="user", cascade="all, delete-orphan")
