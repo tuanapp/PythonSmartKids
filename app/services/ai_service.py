@@ -1,6 +1,6 @@
 import json
 from openai import OpenAI
-from app.config import AI_BRIDGE_BASE_URL, AI_BRIDGE_API_KEY, AI_BRIDGE_MODEL, HTTP_REFERER, APP_TITLE, MAX_ATTEMPTS_HISTORY_LIMIT
+from app.config import AI_BRIDGE_BASE_URL, AI_BRIDGE_API_KEY, AI_BRIDGE_MODEL, AI_FALLBACK_MODEL_1, HTTP_REFERER, APP_TITLE, MAX_ATTEMPTS_HISTORY_LIMIT
 from app.validators.response_validator import OpenAIResponseValidator
 from app.services.prompt_service import PromptService
 import random
@@ -294,226 +294,283 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
     error_message = None
     prompt_text = ""
     
-    try:
-        
-        # Use passed configuration or fall back to global config
-        api_key = ai_bridge_api_key or AI_BRIDGE_API_KEY
-        base_url = ai_bridge_base_url or AI_BRIDGE_BASE_URL
-        model = ai_bridge_model or AI_BRIDGE_MODEL
+    # Determine which models to try (primary + fallback)
+    api_key = ai_bridge_api_key or AI_BRIDGE_API_KEY
+    base_url = ai_bridge_base_url or AI_BRIDGE_BASE_URL
+    primary_model = ai_bridge_model or AI_BRIDGE_MODEL
+    fallback_model = AI_FALLBACK_MODEL_1
+    
+    # List of models to try in order
+    models_to_try = [primary_model]
+    # Only add fallback if it's different from primary and not empty
+    if fallback_model and fallback_model != primary_model:
+        models_to_try.append(fallback_model)
+    
+    last_error = None
+    last_error_model = None
+    
+    for attempt_index, model in enumerate(models_to_try):
+        is_fallback_attempt = attempt_index > 0
         model_name = model  # Save for logging
         
-        # Create a new client with the specified configuration
-        api_client = OpenAI(
-            base_url=base_url,
-            api_key=api_key,
-            default_headers={
-                "HTTP-Referer": HTTP_REFERER,
-                "X-Title": APP_TITLE
-            }
-        )
+        if is_fallback_attempt:
+            logger.info(f"Primary model failed, trying fallback model: {model}")
+            # Reset timing for fallback attempt
+            api_start_time_ms = int(time.time() * 1000)
+            response_time_ms = None
+            current_response_text = ""
+            prompt_tokens = None
+            completion_tokens = None
+            total_tokens = None
         
-        logger.debug(f"Using AI Bridge config - Model: {model}, Base URL: {base_url}")
-        
-        # Save prompt text for logging
-        prompt_text = prompt['content']
-        
-        completion = api_client.chat.completions.create(
-            model=model,
-            messages=[prompt]
-        )
-        
-        # Calculate response time in milliseconds
-        api_end_time_ms = int(time.time() * 1000)
-        response_time_ms = api_end_time_ms - api_start_time_ms
-        
-        # Extract and parse the response
-        response_text = completion.choices[0].message.content
-        
-        # Extract token usage from completion (if available)
-        if hasattr(completion, 'usage') and completion.usage:
-            prompt_tokens = completion.usage.prompt_tokens
-            completion_tokens = completion.usage.completion_tokens
-            total_tokens = completion.usage.total_tokens
-            logger.debug(f"Token usage - Prompt: {prompt_tokens}, Completion: {completion_tokens}, Total: {total_tokens}")
-        
-        current_response_text = response_text
-        
-        # Validate the AI response using the comprehensive validator
-        validator = OpenAIResponseValidator()
-        validation_result = validator.validate_partial_response(response_text, min_questions=1)
-        
-        logger.debug(f"Validation result: {validation_result['is_valid']}")
-        if validation_result['errors']:
-            logger.warning(f"Validation errors: {validation_result['errors']}")
-        if validation_result['warnings']:
-            logger.info(f"Validation warnings: {validation_result['warnings']}")
-        
-        # Log validation summary
-        validation_summary = validator.get_validation_summary(validation_result)
-        logger.info(f"Response validation summary:\n{validation_summary}")
-        
-        if validation_result['is_valid']:
-            questions = validation_result['questions']
-            logger.debug(f"Successfully validated {len(questions)} questions")
-            logger.debug(f"AI Bridge API response time: {response_time_ms}ms")
-            
-            # Log prompt interaction (success case)
-            prompt_id = prompt_service.record_prompt(
-                uid=uid,
-                request_type='question_generation',
-                request_text=prompt_text,
-                response_text=current_response_text,
-                model_name=model_name,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=total_tokens,
-                response_time_ms=response_time_ms,
-                status='success',
-                error_message=None,
-                is_live=is_live,  # Use passed is_live parameter
-                level=level,
-                source='api'
-            )
-            
-            return {
-                'questions': questions,
-                'timestamp': datetime.now(),
-                'message': "Success",
-                'ai_response': current_response_text,
-                'ai_request': prompt['content'],  # Include the prompt text
-                'response_time': response_time_ms / 1000.0,  # Convert to seconds for backward compatibility
-                'prompt_id': prompt_id,  # Add prompt ID
-                'validation_result': {
-                    'is_valid': validation_result['is_valid'],
-                    'is_partial': validation_result.get('is_partial', False),
-                    'questions_validated': len(questions),
-                    'errors_count': len(validation_result['errors']),
-                    'warnings_count': len(validation_result['warnings']),
-                    'ai_model': model,
-                    'historical_records': f"{len(attempts)} db attempts used out of {MAX_ATTEMPTS_HISTORY_LIMIT} max",
-                    'level': level,
-                    'is_new_user': is_new_user,
-                    'user_type': 'new_user' if is_new_user else 'returning_user'
+        try:
+            # Create a new client with the specified configuration
+            api_client = OpenAI(
+                base_url=base_url,
+                api_key=api_key,
+                default_headers={
+                    "HTTP-Referer": HTTP_REFERER,
+                    "X-Title": APP_TITLE
                 }
-            }
-        else:
-            # If validation fails, log as error and fall back to fallback questions
-            status = 'error'
-            error_message = f"Validation failed: {'; '.join(validation_result['errors'][:3])}"
-            
-            # Log prompt interaction (validation failure)
-            prompt_id = prompt_service.record_prompt(
-                uid=uid,
-                request_type='question_generation',
-                request_text=prompt_text,
-                response_text=current_response_text,
-                model_name=model_name,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=total_tokens,
-                response_time_ms=response_time_ms,
-                status=status,
-                error_message=error_message,
-                is_live=is_live,
-                level=level,
-                source='api'
             )
             
-            logger.error("AI response validation failed, using fallback questions")
-            fallback_result = generate_fallback_questions(
-                error_message, 
-                current_response_text, 
-                response_time_ms / 1000.0,  # Convert to seconds
-                attempts,
-                level,
-                prompt['content']  # Pass the prompt text
+            logger.debug(f"Using AI Bridge config - Model: {model}, Base URL: {base_url}, Attempt: {attempt_index + 1}/{len(models_to_try)}")
+            
+            # Save prompt text for logging
+            prompt_text = prompt['content']
+            
+            completion = api_client.chat.completions.create(
+                model=model,
+                messages=[prompt]
             )
-            fallback_result['validation_result'] = {
-                'is_valid': False,
-                'original_errors': validation_result['errors'],
-                'original_warnings': validation_result['warnings'],
-                'historical_records': f"{len(attempts)} db attempts used out of {MAX_ATTEMPTS_HISTORY_LIMIT} max",
-                'level': level,
-                'is_new_user': is_new_user,
-                'user_type': 'new_user' if is_new_user else 'returning_user'
-            }
-            fallback_result['prompt_id'] = prompt_id  # Add prompt ID
-            return fallback_result
-    except json.JSONDecodeError as je:
-        # Calculate response time even on error
-        if response_time_ms is None:
+            
+            # Calculate response time in milliseconds
             api_end_time_ms = int(time.time() * 1000)
             response_time_ms = api_end_time_ms - api_start_time_ms
-        
-        status = 'error'
-        error_message = f"JSON decode error: {str(je)}"
-        
-        # Log prompt interaction (JSON error)
-        prompt_id = prompt_service.record_prompt(
-            uid=uid,
-            request_type='question_generation',
-            request_text=prompt_text,
-            response_text=current_response_text,
-            model_name=model_name,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            response_time_ms=response_time_ms,
-            status=status,
-            error_message=error_message,
-            is_live=is_live,
-            level=level,
-            source='fallback'
-        )
-        
-        logger.error(f"JSON decode error: {str(je)}")
-        logger.error(f"AI Bridge API response time: {response_time_ms}ms")
-        
-        fallback_result = generate_fallback_questions(
-            str(je), current_response_text, response_time_ms / 1000.0, attempts, level, prompt_text
-        )
-        fallback_result['prompt_id'] = prompt_id
-        return fallback_result
-        
-    except Exception as e:
-        # Calculate response time even on error
-        if response_time_ms is None:
-            api_end_time_ms = int(time.time() * 1000)
-            response_time_ms = api_end_time_ms - api_start_time_ms
-        
-        status = 'error'
-        error_message = f"Exception: {str(e)}"
-        
-        # Log prompt interaction (general error)
-        prompt_id = prompt_service.record_prompt(
-            uid=uid,
-            request_type='question_generation',
-            request_text=prompt_text if prompt_text else "Error before prompt creation",
-            response_text=current_response_text,
-            model_name=model_name,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            response_time_ms=response_time_ms,
-            status=status,
-            error_message=error_message,
-            is_live=is_live,
-            level=level,
-            source='fallback'
-        )
-        
-        logger.error(f"Error generating questions with AI: {str(e)}")
-        api_key = ai_bridge_api_key or AI_BRIDGE_API_KEY
-        base_url = ai_bridge_base_url or AI_BRIDGE_BASE_URL
-        model = ai_bridge_model or AI_BRIDGE_MODEL
-        logger.error(f"ai client info : {model} {api_key} {base_url}")
-        logger.error(f"AI Bridge API response time: {response_time_ms}ms")
-        
-        fallback_result = generate_fallback_questions(
-            str(e), current_response_text, response_time_ms / 1000.0, attempts, level, prompt_text if prompt_text else ""
-        )
-        fallback_result['prompt_id'] = prompt_id
-        return fallback_result
+            
+            # Extract and parse the response
+            response_text = completion.choices[0].message.content
+            
+            # Extract token usage from completion (if available)
+            if hasattr(completion, 'usage') and completion.usage:
+                prompt_tokens = completion.usage.prompt_tokens
+                completion_tokens = completion.usage.completion_tokens
+                total_tokens = completion.usage.total_tokens
+                logger.debug(f"Token usage - Prompt: {prompt_tokens}, Completion: {completion_tokens}, Total: {total_tokens}")
+            
+            current_response_text = response_text
+            
+            # Validate the AI response using the comprehensive validator
+            validator = OpenAIResponseValidator()
+            validation_result = validator.validate_partial_response(response_text, min_questions=1)
+            
+            logger.debug(f"Validation result: {validation_result['is_valid']}")
+            if validation_result['errors']:
+                logger.warning(f"Validation errors: {validation_result['errors']}")
+            if validation_result['warnings']:
+                logger.info(f"Validation warnings: {validation_result['warnings']}")
+            
+            # Log validation summary
+            validation_summary = validator.get_validation_summary(validation_result)
+            logger.info(f"Response validation summary:\n{validation_summary}")
+            
+            if validation_result['is_valid']:
+                questions = validation_result['questions']
+                logger.debug(f"Successfully validated {len(questions)} questions")
+                logger.debug(f"AI Bridge API response time: {response_time_ms}ms")
+                
+                # Log prompt interaction (success case)
+                prompt_id = prompt_service.record_prompt(
+                    uid=uid,
+                    request_type='question_generation',
+                    request_text=prompt_text,
+                    response_text=current_response_text,
+                    model_name=model_name,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    response_time_ms=response_time_ms,
+                    status='success',
+                    error_message=None,
+                    is_live=is_live,  # Use passed is_live parameter
+                    level=level,
+                    source='api' if not is_fallback_attempt else 'fallback_api'
+                )
+                
+                return {
+                    'questions': questions,
+                    'timestamp': datetime.now(),
+                    'message': "Success" if not is_fallback_attempt else f"Success (fallback: {model})",
+                    'ai_response': current_response_text,
+                    'ai_request': prompt['content'],  # Include the prompt text
+                    'response_time': response_time_ms / 1000.0,  # Convert to seconds for backward compatibility
+                    'prompt_id': prompt_id,  # Add prompt ID
+                    'validation_result': {
+                        'is_valid': validation_result['is_valid'],
+                        'is_partial': validation_result.get('is_partial', False),
+                        'questions_validated': len(questions),
+                        'errors_count': len(validation_result['errors']),
+                        'warnings_count': len(validation_result['warnings']),
+                        'ai_model': model,
+                        'used_fallback': is_fallback_attempt,
+                        'historical_records': f"{len(attempts)} db attempts used out of {MAX_ATTEMPTS_HISTORY_LIMIT} max",
+                        'level': level,
+                        'is_new_user': is_new_user,
+                        'user_type': 'new_user' if is_new_user else 'returning_user'
+                    }
+                }
+            else:
+                # Validation failed - if we have more models to try, continue
+                last_error = f"Validation failed: {'; '.join(validation_result['errors'][:3])}"
+                last_error_model = model
+                
+                if is_fallback_attempt or len(models_to_try) == 1:
+                    # This was the last model, fall back to hardcoded questions
+                    status = 'error'
+                    error_message = last_error
+                    
+                    # Log prompt interaction (validation failure)
+                    prompt_id = prompt_service.record_prompt(
+                        uid=uid,
+                        request_type='question_generation',
+                        request_text=prompt_text,
+                        response_text=current_response_text,
+                        model_name=model_name,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=total_tokens,
+                        response_time_ms=response_time_ms,
+                        status=status,
+                        error_message=error_message,
+                        is_live=is_live,
+                        level=level,
+                        source='api'
+                    )
+                    
+                    logger.error("AI response validation failed, using fallback questions")
+                    fallback_result = generate_fallback_questions(
+                        error_message, 
+                        current_response_text, 
+                        response_time_ms / 1000.0,  # Convert to seconds
+                        attempts,
+                        level,
+                        prompt['content']  # Pass the prompt text
+                    )
+                    fallback_result['validation_result'] = {
+                        'is_valid': False,
+                        'original_errors': validation_result['errors'],
+                        'original_warnings': validation_result['warnings'],
+                        'historical_records': f"{len(attempts)} db attempts used out of {MAX_ATTEMPTS_HISTORY_LIMIT} max",
+                        'level': level,
+                        'is_new_user': is_new_user,
+                        'user_type': 'new_user' if is_new_user else 'returning_user'
+                    }
+                    fallback_result['prompt_id'] = prompt_id  # Add prompt ID
+                    return fallback_result
+                else:
+                    # More models available, log and continue
+                    logger.warning(f"Model {model} validation failed, will try fallback model")
+                    continue
+                    
+        except json.JSONDecodeError as je:
+            last_error = f"JSON decode error: {str(je)}"
+            last_error_model = model
+            
+            if is_fallback_attempt or len(models_to_try) == 1:
+                # Calculate response time even on error
+                if response_time_ms is None:
+                    api_end_time_ms = int(time.time() * 1000)
+                    response_time_ms = api_end_time_ms - api_start_time_ms
+                
+                status = 'error'
+                error_message = last_error
+                
+                # Log prompt interaction (JSON error)
+                prompt_id = prompt_service.record_prompt(
+                    uid=uid,
+                    request_type='question_generation',
+                    request_text=prompt_text,
+                    response_text=current_response_text,
+                    model_name=model_name,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    response_time_ms=response_time_ms,
+                    status=status,
+                    error_message=error_message,
+                    is_live=is_live,
+                    level=level,
+                    source='fallback'
+                )
+                
+                logger.error(f"JSON decode error: {str(je)}")
+                logger.error(f"AI Bridge API response time: {response_time_ms}ms")
+                
+                fallback_result = generate_fallback_questions(
+                    str(je), current_response_text, response_time_ms / 1000.0, attempts, level, prompt_text
+                )
+                fallback_result['prompt_id'] = prompt_id
+                return fallback_result
+            else:
+                # More models available, log and continue
+                logger.warning(f"Model {model} JSON decode error, will try fallback model: {str(je)}")
+                continue
+            
+        except Exception as e:
+            last_error = f"Exception: {str(e)}"
+            last_error_model = model
+            
+            if is_fallback_attempt or len(models_to_try) == 1:
+                # Calculate response time even on error
+                if response_time_ms is None:
+                    api_end_time_ms = int(time.time() * 1000)
+                    response_time_ms = api_end_time_ms - api_start_time_ms
+                
+                status = 'error'
+                error_message = last_error
+                
+                # Log prompt interaction (general error)
+                prompt_id = prompt_service.record_prompt(
+                    uid=uid,
+                    request_type='question_generation',
+                    request_text=prompt_text if prompt_text else "Error before prompt creation",
+                    response_text=current_response_text,
+                    model_name=model_name,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    response_time_ms=response_time_ms,
+                    status=status,
+                    error_message=error_message,
+                    is_live=is_live,
+                    level=level,
+                    source='fallback'
+                )
+                
+                logger.error(f"Error generating questions with AI: {str(e)}")
+                logger.error(f"ai client info : {model} {api_key} {base_url}")
+                logger.error(f"AI Bridge API response time: {response_time_ms}ms")
+                
+                fallback_result = generate_fallback_questions(
+                    str(e), current_response_text, response_time_ms / 1000.0, attempts, level, prompt_text if prompt_text else ""
+                )
+                fallback_result['prompt_id'] = prompt_id
+                return fallback_result
+            else:
+                # More models available, log and continue
+                logger.warning(f"Model {model} exception, will try fallback model: {str(e)}")
+                continue
+    
+    # This should not be reached, but just in case all models fail without returning
+    logger.error(f"All AI models failed. Last error from {last_error_model}: {last_error}")
+    return generate_fallback_questions(
+        last_error or "All AI models failed", 
+        current_response_text, 
+        None, 
+        attempts, 
+        level, 
+        prompt_text if prompt_text else ""
+    )
 
 def generate_fallback_questions(error_message="Unknown error occurred", current_response_text="", response_time=None, attempts=None, level=None, prompt_text=""):
     """Generate basic questions as a fallback if AI fails"""

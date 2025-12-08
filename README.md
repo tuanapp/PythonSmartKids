@@ -231,7 +231,8 @@ The application uses environment variables for configuration management. These c
 | `OPENAI_MODEL` | `""` | OpenAI model to use |
 | `FORGE_BASE_URL` | `https://api.forge.tensorblock.co/v1` | AI Bridge (Forge) API base URL |
 | `FORGE_API_KEY` | `""` | AI Bridge API key |
-| `FORGE_AI_MODEL` | `Gemini/models/gemini-2.0-flash` | AI Bridge model to use |
+| `FORGE_AI_MODEL` | `Gemini/models/gemini-2.0-flash` | Primary AI model to use |
+| `FORGE_FALLBACK_MODEL_1` | `Groq/llama-3.3-70b-versatile` | Fallback AI model (used when primary fails) |
 
 ### Application Configuration
 
