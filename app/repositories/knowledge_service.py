@@ -27,7 +27,7 @@ class KnowledgeService:
             List of subject dictionaries
         """
         try:
-            conn = db_provider.get_connection()
+            conn = db_provider._get_connection()
             cursor = conn.cursor()
             
             # Note: grade_level filtering would require knowledge_documents join
@@ -67,7 +67,7 @@ class KnowledgeService:
             Subject dictionary or None if not found
         """
         try:
-            conn = db_provider.get_connection()
+            conn = db_provider._get_connection()
             cursor = conn.cursor()
             
             cursor.execute(
@@ -110,7 +110,7 @@ class KnowledgeService:
             List of knowledge document dictionaries
         """
         try:
-            conn = db_provider.get_connection()
+            conn = db_provider._get_connection()
             cursor = conn.cursor()
             
             query = """
@@ -165,7 +165,7 @@ class KnowledgeService:
             question_count: Number of questions generated
         """
         try:
-            conn = db_provider.get_connection()
+            conn = db_provider._get_connection()
             cursor = conn.cursor()
             
             cursor.execute(
@@ -219,7 +219,7 @@ class KnowledgeService:
             topic: Topic of the question
         """
         try:
-            conn = db_provider.get_connection()
+            conn = db_provider._get_connection()
             cursor = conn.cursor()
             
             cursor.execute(
@@ -262,7 +262,7 @@ class KnowledgeService:
             List of attempt dictionaries
         """
         try:
-            conn = db_provider.get_connection()
+            conn = db_provider._get_connection()
             cursor = conn.cursor()
             
             query = """
@@ -326,7 +326,7 @@ class KnowledgeService:
             ID of the created document
         """
         try:
-            conn = db_provider.get_connection()
+            conn = db_provider._get_connection()
             cursor = conn.cursor()
             
             import json
