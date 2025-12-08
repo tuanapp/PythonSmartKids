@@ -578,13 +578,19 @@ async def debug_subjects_schema():
 async def get_subjects(grade_level: int = None):
     """Get all available subjects, optionally filtered by grade level."""
     from app.repositories.knowledge_service import KnowledgeService
+    import traceback
     
     try:
         subjects = KnowledgeService.get_all_subjects(grade_level)
         return {"subjects": subjects}
     except Exception as e:
-        logger.error(f"Error fetching subjects: {e}")
-        raise HTTPException(status_code=500, detail="Failed to fetch subjects")
+        error_details = {
+            "error": str(e),
+            "type": type(e).__name__,
+            "traceback": traceback.format_exc()
+        }
+        logger.error(f"Error fetching subjects: {error_details}")
+        raise HTTPException(status_code=500, detail=error_details)
 
 
 @router.get("/subjects/{subject_id}")
