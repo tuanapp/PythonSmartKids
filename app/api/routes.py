@@ -528,3 +528,346 @@ async def debug_daily_count(uid: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ============================================================================
+# Knowledge-Based Question Game Routes
+# ============================================================================
+
+@router.get("/subjects")
+async def get_subjects(grade_level: int = None):
+    """Get all available subjects, optionally filtered by grade level."""
+    from app.repositories.knowledge_service import KnowledgeService
+    
+    try:
+        subjects = KnowledgeService.get_all_subjects(grade_level)
+        return {"subjects": subjects}
+    except Exception as e:
+        logger.error(f"Error fetching subjects: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch subjects")
+
+
+@router.get("/subjects/{subject_id}")
+async def get_subject(subject_id: int):
+    """Get a single subject by ID."""
+    from app.repositories.knowledge_service import KnowledgeService
+    
+    try:
+        subject = KnowledgeService.get_subject_by_id(subject_id)
+        if not subject:
+            raise HTTPException(status_code=404, detail="Subject not found")
+        return subject
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching subject {subject_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch subject")
+
+
+@router.get("/subjects/{subject_id}/knowledge")
+async def get_subject_knowledge(
+    subject_id: int,
+    grade_level: int = None,
+    difficulty_level: int = None
+):
+    """Get knowledge documents for a subject."""
+    from app.repositories.knowledge_service import KnowledgeService
+    
+    try:
+        # First verify subject exists
+        subject = KnowledgeService.get_subject_by_id(subject_id)
+        if not subject:
+            raise HTTPException(status_code=404, detail="Subject not found")
+        
+        documents = KnowledgeService.get_knowledge_documents(
+            subject_id, grade_level, difficulty_level
+        )
+        return {"knowledge_documents": documents, "subject": subject}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching knowledge documents: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch knowledge documents")
+
+
+@router.post("/generate-knowledge-questions")
+async def generate_knowledge_questions(request: dict):
+    """
+    Generate questions based on knowledge documents.
+    
+    Request body:
+    - uid: str (required) - Firebase User UID
+    - subject_id: int (required) - Subject ID
+    - count: int (optional, default=10) - Number of questions to generate (1-50)
+    - level: int (optional) - Difficulty level filter (1-6)
+    - is_live: int (optional, default=1) - 1=live, 0=test
+    """
+    from app.repositories.knowledge_service import KnowledgeService
+    from app.services.ai_service import generate_knowledge_based_questions
+    
+    # Extract and validate parameters
+    uid = request.get('uid')
+    subject_id = request.get('subject_id')
+    count = request.get('count', 10)
+    level = request.get('level')
+    is_live = request.get('is_live', 1)
+    
+    if not uid:
+        raise HTTPException(status_code=400, detail="uid is required")
+    if not subject_id:
+        raise HTTPException(status_code=400, detail="subject_id is required")
+    if count < 1 or count > 50:
+        raise HTTPException(status_code=400, detail="count must be between 1 and 50")
+    
+    try:
+        # Check user exists and get subscription info
+        user_data = db_service.get_user_by_uid(uid)
+        if not user_data:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Initialize prompt service for daily limit checking
+        prompt_service = PromptService()
+        daily_count = prompt_service.get_daily_question_generation_count(uid)
+        subscription = user_data.get("subscription", 0)
+        is_premium = subscription >= 2
+        max_daily = None if is_premium else 2
+        
+        # Check daily limit for non-premium users
+        if not is_premium and daily_count >= max_daily:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "message": "Daily limit reached",
+                    "current_count": daily_count,
+                    "max_count": max_daily,
+                    "is_premium": is_premium
+                }
+            )
+        
+        # Get subject info
+        subject = KnowledgeService.get_subject_by_id(subject_id)
+        if not subject:
+            raise HTTPException(status_code=404, detail="Subject not found")
+        
+        # Get knowledge documents
+        user_grade = user_data.get("grade_level")
+        knowledge_docs = KnowledgeService.get_knowledge_documents(
+            subject_id,
+            user_grade,
+            level
+        )
+        
+        if not knowledge_docs:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No knowledge documents found for subject '{subject['display_name']}'"
+            )
+        
+        # Combine knowledge content (use first document or combine multiple)
+        knowledge_content = knowledge_docs[0]['content']
+        if len(knowledge_docs) > 1:
+            # Combine summaries or first portions of multiple documents
+            summaries = [doc.get('summary') or doc['content'][:500] for doc in knowledge_docs[:3]]
+            knowledge_content = "\n\n---\n\n".join(summaries)
+        
+        # Get user's attempt history for personalization
+        user_history = KnowledgeService.get_user_knowledge_attempts(uid, subject_id, limit=20)
+        
+        # Generate questions using AI
+        result = generate_knowledge_based_questions(
+            uid=uid,
+            subject_id=subject_id,
+            subject_name=subject['display_name'],
+            knowledge_content=knowledge_content,
+            count=count,
+            level=level,
+            user_history=user_history,
+            is_live=is_live
+        )
+        
+        # Log usage
+        KnowledgeService.log_knowledge_usage(
+            uid,
+            knowledge_docs[0]['id'] if knowledge_docs else None,
+            subject_id,
+            count
+        )
+        
+        # Update daily count (increment in prompts table was already done in AI service)
+        
+        return {
+            "message": "Questions generated successfully",
+            "questions": result['questions'],
+            "validation_result": {
+                "ai_model": result['ai_model'],
+                "generation_time_ms": result['generation_time_ms']
+            },
+            "daily_count": daily_count + 1,
+            "daily_limit": max_daily,
+            "is_premium": is_premium,
+            "subject": subject
+        }
+        
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.error(f"Validation error generating knowledge questions: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error generating knowledge questions: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate questions: {str(e)}")
+
+
+@router.post("/evaluate-answers")
+async def evaluate_answers(request: dict):
+    """
+    Evaluate user answers using AI.
+    
+    Request body:
+    - uid: str (required) - Firebase User UID
+    - subject_id: int (required) - Subject ID
+    - evaluations: List[dict] (required) - List of {question, user_answer, correct_answer}
+    - is_live: int (optional, default=1) - 1=live, 0=test
+    """
+    from app.repositories.knowledge_service import KnowledgeService
+    from app.services.ai_service import evaluate_answers_with_ai
+    
+    # Extract and validate parameters
+    uid = request.get('uid')
+    subject_id = request.get('subject_id')
+    evaluations = request.get('evaluations', [])
+    is_live = request.get('is_live', 1)
+    
+    if not uid:
+        raise HTTPException(status_code=400, detail="uid is required")
+    if not subject_id:
+        raise HTTPException(status_code=400, detail="subject_id is required")
+    if not evaluations:
+        raise HTTPException(status_code=400, detail="evaluations list is required")
+    
+    try:
+        # Get subject info
+        subject = KnowledgeService.get_subject_by_id(subject_id)
+        if not subject:
+            raise HTTPException(status_code=404, detail="Subject not found")
+        
+        # Prepare answers for evaluation
+        answers = [
+            {
+                'question': e.get('question', ''),
+                'user_answer': e.get('user_answer', ''),
+                'correct_answer': e.get('correct_answer', '')
+            }
+            for e in evaluations
+        ]
+        
+        # Evaluate answers using AI
+        results = evaluate_answers_with_ai(
+            answers=answers,
+            subject_name=subject['display_name'],
+            uid=uid,
+            is_live=is_live
+        )
+        
+        # Save attempts to database
+        for i, result in enumerate(results):
+            try:
+                # Get additional info from original evaluation request
+                original = evaluations[i] if i < len(evaluations) else {}
+                
+                KnowledgeService.save_knowledge_attempt(
+                    uid=uid,
+                    subject_id=subject_id,
+                    question=result.get('question', ''),
+                    user_answer=result.get('user_answer', ''),
+                    correct_answer=result.get('correct_answer', ''),
+                    evaluation_status=result.get('status', 'unknown'),
+                    ai_feedback=result.get('ai_feedback'),
+                    best_answer=result.get('best_answer'),
+                    improvement_tips=result.get('improvement_tips'),
+                    score=result.get('score'),
+                    difficulty_level=original.get('difficulty'),
+                    topic=original.get('topic')
+                )
+            except Exception as save_error:
+                logger.warning(f"Failed to save attempt: {save_error}")
+        
+        # Calculate summary stats
+        correct_count = sum(1 for r in results if r.get('status') == 'correct')
+        partial_count = sum(1 for r in results if r.get('status') == 'partial')
+        incorrect_count = sum(1 for r in results if r.get('status') == 'incorrect')
+        total_score = sum(r.get('score', 0) for r in results) / len(results) if results else 0
+        
+        return {
+            "message": "Answers evaluated successfully",
+            "evaluations": results,
+            "summary": {
+                "total": len(results),
+                "correct": correct_count,
+                "partial": partial_count,
+                "incorrect": incorrect_count,
+                "average_score": round(total_score, 2)
+            },
+            "subject": subject
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error evaluating answers: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to evaluate answers: {str(e)}")
+
+
+@router.post("/admin/knowledge-documents")
+async def create_knowledge_document(request: dict, admin_key: str = ""):
+    """
+    Create a new knowledge document (admin only).
+    
+    Request body:
+    - subject_id: int (required)
+    - title: str (required)
+    - content: str (required)
+    - summary: str (optional)
+    - metadata: dict (optional)
+    - grade_level: int (optional, 4-7)
+    - difficulty_level: int (optional, 1-6)
+    """
+    from app.repositories.knowledge_service import KnowledgeService
+    
+    # Verify admin access
+    expected_key = os.getenv('ADMIN_KEY', 'dev-admin-key')
+    if admin_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+    
+    # Extract parameters
+    subject_id = request.get('subject_id')
+    title = request.get('title')
+    content = request.get('content')
+    
+    if not subject_id:
+        raise HTTPException(status_code=400, detail="subject_id is required")
+    if not title:
+        raise HTTPException(status_code=400, detail="title is required")
+    if not content:
+        raise HTTPException(status_code=400, detail="content is required")
+    
+    try:
+        doc_id = KnowledgeService.create_knowledge_document(
+            subject_id=subject_id,
+            title=title,
+            content=content,
+            summary=request.get('summary'),
+            metadata=request.get('metadata'),
+            grade_level=request.get('grade_level'),
+            difficulty_level=request.get('difficulty_level'),
+            created_by=request.get('created_by', 'admin')
+        )
+        
+        return {
+            "message": "Knowledge document created successfully",
+            "id": doc_id
+        }
+        
+    except Exception as e:
+        logger.error(f"Error creating knowledge document: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create knowledge document: {str(e)}")
+
+

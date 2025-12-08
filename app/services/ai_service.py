@@ -1,4 +1,5 @@
 import json
+from typing import List, Optional
 from openai import OpenAI
 from app.config import AI_BRIDGE_BASE_URL, AI_BRIDGE_API_KEY, AI_BRIDGE_MODEL, AI_FALLBACK_MODEL_1, HTTP_REFERER, APP_TITLE, MAX_ATTEMPTS_HISTORY_LIMIT
 from app.validators.response_validator import OpenAIResponseValidator
@@ -658,3 +659,324 @@ def generate_fallback_questions(error_message="Unknown error occurred", current_
     return result
 
 #test
+
+
+# ============================================================================
+# Knowledge-Based Question Generation Functions
+# ============================================================================
+
+def generate_knowledge_based_questions(
+    uid: str,
+    subject_id: int,
+    subject_name: str,
+    knowledge_content: str,
+    count: int = 10,
+    level: Optional[int] = None,
+    user_history: Optional[List[dict]] = None,
+    is_live: int = 1
+) -> dict:
+    """
+    Generate questions based on knowledge document content.
+    
+    Args:
+        uid: User ID
+        subject_id: Subject ID
+        subject_name: Name of the subject
+        knowledge_content: Knowledge document content
+        count: Number of questions to generate
+        level: Difficulty level (1-6)
+        user_history: User's previous attempts for personalization
+        is_live: 1=live production call, 0=test/local call
+    
+    Returns:
+        Dict with questions array and metadata, including prompt_id for tracking
+    """
+    from app.services.prompt_service import PromptService
+    prompt_service = PromptService()
+    prompt_id = None
+    
+    # Build context from user history
+    weak_areas = []
+    strong_areas = []
+    if user_history:
+        for attempt in user_history:
+            if attempt.get('subject_id') == subject_id:
+                if attempt.get('evaluation_status') in ['incorrect', 'partial']:
+                    weak_areas.append({
+                        'question': attempt['question'],
+                        'user_answer': attempt.get('user_answer', ''),
+                        'correct_answer': attempt['correct_answer']
+                    })
+                elif attempt.get('evaluation_status') == 'correct':
+                    strong_areas.append({
+                        'question': attempt['question'],
+                        'correct_answer': attempt['correct_answer']
+                    })
+    
+    # Limit weak/strong areas to avoid prompt being too long
+    weak_areas = weak_areas[:5]
+    strong_areas = strong_areas[:5]
+    
+    # Construct AI prompt
+    difficulty_note = f"Target difficulty level: {level} (1=easiest, 6=hardest)" if level else "Mixed difficulty levels"
+    
+    response_json_format = '''[
+    {
+        "number": 1,
+        "topic": "Topic name",
+        "question": "Question text?",
+        "answer": "Correct answer",
+        "answer_type": "text",
+        "difficulty": 3
+    }
+]'''
+    
+    prompt_content = f"""You are an educational content generator. Generate {count} questions based on the following knowledge document for {subject_name}.
+
+**Knowledge Content:**
+{knowledge_content[:4000]}
+
+**Context:**
+- Number of questions to generate: {count}
+- {difficulty_note}
+- Student's weak areas: {json.dumps(weak_areas) if weak_areas else 'None (new student)'}
+- Student's strong areas: {json.dumps(strong_areas) if strong_areas else 'None (new student)'}
+
+**Requirements:**
+1. Generate exactly {count} questions based on the knowledge content
+2. Questions should test understanding, not just memorization
+3. Cover different aspects/topics from the knowledge document
+4. If student has weak areas, include similar but different questions
+5. Vary difficulty levels appropriately (1-6 scale)
+6. Include clear, unambiguous questions
+7. Provide concise, accurate answers
+8. answer_type can be: "text", "numeric", or "boolean"
+
+**Output Format (JSON only, no additional text):**
+{response_json_format}
+
+Generate ONLY valid JSON without any markdown formatting, explanations, or wrapping text."""
+
+    prompt = {
+        "role": "user",
+        "content": prompt_content
+    }
+    
+    logger.info(f"Generating {count} knowledge-based questions for subject {subject_id} ({subject_name})")
+    
+    # Start timing the API call
+    api_start_time = time.time()
+    response_time_ms = None
+    model_name = AI_BRIDGE_MODEL
+    
+    try:
+        completion = client.chat.completions.create(
+            model=AI_BRIDGE_MODEL,
+            messages=[prompt],
+            temperature=0.7
+        )
+        
+        response_text = completion.choices[0].message.content
+        response_time_ms = int((time.time() - api_start_time) * 1000)
+        
+        # Clean response text (remove markdown code blocks if present)
+        cleaned_response = response_text.strip()
+        if cleaned_response.startswith('```'):
+            # Remove markdown code block wrapper
+            lines = cleaned_response.split('\n')
+            if lines[0].startswith('```'):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == '```':
+                lines = lines[:-1]
+            cleaned_response = '\n'.join(lines)
+        
+        # Parse and validate response
+        questions = json.loads(cleaned_response)
+        
+        # Validate structure and ensure all questions have required fields
+        validated_questions = []
+        for i, q in enumerate(questions):
+            validated_questions.append({
+                'number': q.get('number', i + 1),
+                'topic': q.get('topic', 'General'),
+                'question': q.get('question', ''),
+                'answer': str(q.get('answer', '')),
+                'answer_type': q.get('answer_type', 'text'),
+                'difficulty': q.get('difficulty', 3)
+            })
+        
+        # Extract token usage
+        prompt_tokens = completion.usage.prompt_tokens if hasattr(completion.usage, 'prompt_tokens') else None
+        completion_tokens = completion.usage.completion_tokens if hasattr(completion.usage, 'completion_tokens') else None
+        total_tokens = completion.usage.total_tokens if hasattr(completion.usage, 'total_tokens') else None
+        
+        # Log prompt usage
+        try:
+            prompt_id = prompt_service.log_llm_interaction(
+                uid=uid,
+                request_text=prompt_content,
+                response_text=response_text,
+                model_name=model_name,
+                is_live=is_live,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                response_time_ms=response_time_ms,
+                status='success'
+            )
+        except Exception as log_error:
+            logger.warning(f"Failed to log prompt: {log_error}")
+        
+        return {
+            'questions': validated_questions,
+            'ai_model': model_name,
+            'generation_time_ms': response_time_ms,
+            'count': len(validated_questions),
+            'prompt_id': prompt_id
+        }
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"Error parsing AI response as JSON: {e}")
+        logger.error(f"Response was: {response_text if 'response_text' in dir() else 'N/A'}")
+        raise ValueError(f"AI returned invalid JSON: {e}")
+        
+    except Exception as e:
+        logger.error(f"Error generating knowledge-based questions: {e}")
+        raise
+
+
+def evaluate_answers_with_ai(
+    answers: List[dict],
+    subject_name: str,
+    uid: str = None,
+    is_live: int = 1
+) -> List[dict]:
+    """
+    Evaluate user answers using AI.
+    
+    Args:
+        answers: List of {question, user_answer, correct_answer}
+        subject_name: Name of the subject for context
+        uid: User ID for logging
+        is_live: 1=live production call, 0=test/local call
+    
+    Returns:
+        List of evaluation results with feedback
+    """
+    from app.services.prompt_service import PromptService
+    prompt_service = PromptService()
+    
+    response_json_format = '''[
+    {
+        "question": "original question",
+        "user_answer": "student's answer",
+        "correct_answer": "expected answer",
+        "status": "correct",
+        "score": 1.0,
+        "ai_feedback": "Brief feedback",
+        "best_answer": "Ideal answer with explanation",
+        "improvement_tips": "Specific tips for improvement"
+    }
+]'''
+    
+    prompt_content = f"""You are an expert educator evaluating student answers for {subject_name}.
+
+**Instructions:**
+For each question-answer pair, evaluate the student's answer and provide:
+1. Status: 'correct', 'incorrect', or 'partial'
+2. Score: 0.0 to 1.0 (0.0 = completely wrong, 1.0 = perfect)
+3. Feedback: Brief explanation of why the answer is correct/incorrect
+4. Best Answer: The ideal answer with explanation
+5. Improvement Tips: Specific tips if the answer needs improvement (can be null if correct)
+
+**Questions and Answers:**
+{json.dumps(answers, indent=2)}
+
+**Output Format (JSON only):**
+{response_json_format}
+
+Generate ONLY valid JSON without markdown formatting or extra text."""
+
+    prompt = {
+        "role": "user",
+        "content": prompt_content
+    }
+    
+    logger.info(f"Evaluating {len(answers)} answers for {subject_name}")
+    
+    api_start_time = time.time()
+    
+    try:
+        completion = client.chat.completions.create(
+            model=AI_BRIDGE_MODEL,
+            messages=[prompt],
+            temperature=0.3  # Lower temperature for more consistent evaluation
+        )
+        
+        response_text = completion.choices[0].message.content
+        response_time_ms = int((time.time() - api_start_time) * 1000)
+        
+        # Clean response text
+        cleaned_response = response_text.strip()
+        if cleaned_response.startswith('```'):
+            lines = cleaned_response.split('\n')
+            if lines[0].startswith('```'):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == '```':
+                lines = lines[:-1]
+            cleaned_response = '\n'.join(lines)
+        
+        evaluations = json.loads(cleaned_response)
+        
+        # Log prompt usage
+        if uid:
+            try:
+                prompt_service.log_llm_interaction(
+                    uid=uid,
+                    request_text=prompt_content,
+                    response_text=response_text,
+                    model_name=AI_BRIDGE_MODEL,
+                    is_live=is_live,
+                    response_time_ms=response_time_ms,
+                    status='success'
+                )
+            except Exception as log_error:
+                logger.warning(f"Failed to log prompt: {log_error}")
+        
+        logger.info(f"Successfully evaluated {len(evaluations)} answers in {response_time_ms}ms")
+        return evaluations
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"Error parsing AI evaluation response as JSON: {e}")
+        # Fallback to simple comparison
+        return _fallback_evaluation(answers)
+        
+    except Exception as e:
+        logger.error(f"Error evaluating answers: {e}")
+        # Fallback to simple comparison
+        return _fallback_evaluation(answers)
+
+
+def _fallback_evaluation(answers: List[dict]) -> List[dict]:
+    """
+    Fallback evaluation when AI fails - simple string comparison.
+    
+    Args:
+        answers: List of {question, user_answer, correct_answer}
+        
+    Returns:
+        List of basic evaluation results
+    """
+    return [
+        {
+            'question': ans['question'],
+            'user_answer': ans['user_answer'],
+            'correct_answer': ans['correct_answer'],
+            'status': 'correct' if ans['user_answer'].strip().lower() == ans['correct_answer'].strip().lower() else 'incorrect',
+            'score': 1.0 if ans['user_answer'].strip().lower() == ans['correct_answer'].strip().lower() else 0.0,
+            'ai_feedback': 'Evaluated using simple comparison (AI unavailable)',
+            'best_answer': ans['correct_answer'],
+            'improvement_tips': None if ans['user_answer'].strip().lower() == ans['correct_answer'].strip().lower() else 'Review the correct answer and try again.'
+        }
+        for ans in answers
+    ]
