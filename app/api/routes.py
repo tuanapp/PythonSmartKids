@@ -901,8 +901,7 @@ async def create_knowledge_document(request: dict, admin_key: str = ""):
             title=title,
             content=content,
             source=request.get('source'),
-            grade_level=request.get('grade_level'),
-            created_by=request.get('created_by', 'admin')
+            grade_level=request.get('grade_level')
         )
         
         return {
@@ -913,5 +912,194 @@ async def create_knowledge_document(request: dict, admin_key: str = ""):
     except Exception as e:
         logger.error(f"Error creating knowledge document: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to create knowledge document: {str(e)}")
+
+
+@router.get("/admin/seed-knowledge-documents")
+async def seed_knowledge_documents(admin_key: str = ""):
+    """
+    Seed the knowledge_documents table with sample content for testing.
+    """
+    from app.repositories.knowledge_service import KnowledgeService
+    
+    # Verify admin access
+    expected_key = os.getenv('ADMIN_KEY', 'dev-admin-key')
+    if admin_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+    
+    # Sample knowledge documents for each subject
+    sample_docs = [
+        # Science (subject_id=1)
+        {
+            "subject_id": 1,
+            "title": "The Solar System",
+            "content": """The Solar System consists of the Sun and the celestial objects that are bound to it by gravity. The eight planets in order from the Sun are: Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, and Neptune. 
+
+Mercury is the smallest planet and closest to the Sun. Venus is the hottest planet due to its thick atmosphere. Earth is the only planet known to support life. Mars is called the Red Planet because of iron oxide on its surface.
+
+Jupiter is the largest planet with a Great Red Spot storm. Saturn is famous for its beautiful rings made of ice and rock. Uranus rotates on its side. Neptune is the windiest planet with speeds reaching 1,200 mph.
+
+The asteroid belt lies between Mars and Jupiter. Beyond Neptune is the Kuiper Belt, home to dwarf planets like Pluto.""",
+            "grade_level": 5,
+            "source": "seed-data"
+        },
+        {
+            "subject_id": 1,
+            "title": "States of Matter",
+            "content": """Matter exists in three main states: solid, liquid, and gas. Each state has unique properties.
+
+Solids have a fixed shape and volume. The particles are tightly packed and vibrate in place. Examples include ice, wood, and metal.
+
+Liquids have a fixed volume but take the shape of their container. Particles are close together but can move around. Examples include water, milk, and oil.
+
+Gases have no fixed shape or volume. Particles are far apart and move freely. Examples include air, oxygen, and steam.
+
+Matter can change states through heating or cooling. Melting changes solid to liquid. Freezing changes liquid to solid. Evaporation changes liquid to gas. Condensation changes gas to liquid.""",
+            "grade_level": 4,
+            "source": "seed-data"
+        },
+        # History (subject_id=2)
+        {
+            "subject_id": 2,
+            "title": "Ancient Egypt",
+            "content": """Ancient Egypt was one of the world's first great civilizations, lasting over 3,000 years. It developed along the Nile River in northeastern Africa.
+
+The Egyptians built massive pyramids as tombs for their pharaohs. The Great Pyramid of Giza is one of the Seven Wonders of the Ancient World. It was built around 2560 BCE for Pharaoh Khufu.
+
+Egyptians developed hieroglyphics, a writing system using pictures and symbols. They wrote on papyrus, an early form of paper made from reeds.
+
+The Egyptians believed in many gods and an afterlife. They mummified bodies to preserve them for the afterlife. King Tutankhamun's tomb was discovered in 1922 with amazing treasures.
+
+Egyptian achievements include the calendar, medicine, mathematics, and engineering. Cleopatra was the last pharaoh before Egypt became part of the Roman Empire.""",
+            "grade_level": 5,
+            "source": "seed-data"
+        },
+        # Geography (subject_id=3)
+        {
+            "subject_id": 3,
+            "title": "Continents and Oceans",
+            "content": """Earth has seven continents and five oceans. The continents are Asia, Africa, North America, South America, Antarctica, Europe, and Australia/Oceania.
+
+Asia is the largest continent, home to China and India. Africa has the Sahara Desert and the Nile River. North America includes the United States, Canada, and Mexico. South America contains the Amazon Rainforest. Antarctica is the coldest continent with no permanent population. Europe has many countries despite being smaller. Australia is both a continent and a country.
+
+The five oceans are the Pacific, Atlantic, Indian, Southern, and Arctic. The Pacific is the largest and deepest ocean. The Atlantic separates the Americas from Europe and Africa. The Indian Ocean is the warmest. The Southern Ocean surrounds Antarctica. The Arctic Ocean is the smallest and coldest.
+
+About 71% of Earth's surface is covered by water.""",
+            "grade_level": 4,
+            "source": "seed-data"
+        },
+        # Nature (subject_id=4)  
+        {
+            "subject_id": 4,
+            "title": "Animal Classifications",
+            "content": """Animals are classified into groups based on their characteristics. The main groups are mammals, birds, reptiles, amphibians, fish, and invertebrates.
+
+Mammals are warm-blooded, have hair or fur, and feed their babies milk. Examples include dogs, cats, elephants, and humans.
+
+Birds are warm-blooded with feathers and lay eggs. They have beaks and most can fly. Examples include eagles, penguins, and sparrows.
+
+Reptiles are cold-blooded with scales. They lay eggs on land. Examples include snakes, lizards, and crocodiles.
+
+Amphibians live both in water and on land. They start life in water with gills, then develop lungs. Examples include frogs, toads, and salamanders.
+
+Fish are cold-blooded and live in water. They breathe through gills and have fins. Examples include salmon, sharks, and goldfish.
+
+Invertebrates have no backbone. They make up 97% of all animals. Examples include insects, spiders, and jellyfish.""",
+            "grade_level": 4,
+            "source": "seed-data"
+        },
+        # Space (subject_id=5)
+        {
+            "subject_id": 5,
+            "title": "Stars and Galaxies",
+            "content": """Stars are giant balls of hot gas that produce light and heat through nuclear fusion. Our Sun is a medium-sized star.
+
+Stars have different colors based on their temperature. Blue stars are the hottest, followed by white, yellow, orange, and red (coolest).
+
+Stars are born in nebulae, clouds of gas and dust. They go through life cycles: main sequence, red giant, and then become white dwarfs, neutron stars, or black holes depending on their size.
+
+A galaxy is a collection of billions of stars, gas, and dust held together by gravity. Our galaxy is the Milky Way, containing about 200 billion stars.
+
+There are three main types of galaxies: spiral (like the Milky Way), elliptical, and irregular. The nearest major galaxy is Andromeda, 2.5 million light-years away.
+
+The universe contains billions of galaxies, each with billions of stars.""",
+            "grade_level": 5,
+            "source": "seed-data"
+        },
+        # Technology (subject_id=6)
+        {
+            "subject_id": 6,
+            "title": "How Computers Work",
+            "content": """Computers are electronic devices that process information. They have hardware (physical parts) and software (programs).
+
+The main hardware components are:
+- CPU (Central Processing Unit): The brain that does calculations
+- RAM (Random Access Memory): Short-term memory for active tasks
+- Storage (Hard drive or SSD): Long-term memory for files
+- Input devices: Keyboard, mouse, microphone
+- Output devices: Monitor, speakers, printer
+
+Software includes the operating system (like Windows or macOS) and applications (like games and word processors).
+
+Computers use binary code - only 0s and 1s. Everything you see on screen is converted to binary for the computer to understand.
+
+The internet connects millions of computers worldwide. Data travels through cables, Wi-Fi, and satellites. A website is hosted on a server - a powerful computer that's always on.
+
+Programming is writing instructions for computers using languages like Python or JavaScript.""",
+            "grade_level": 5,
+            "source": "seed-data"
+        }
+    ]
+    
+    created = []
+    errors = []
+    
+    for doc in sample_docs:
+        try:
+            doc_id = KnowledgeService.create_knowledge_document(
+                subject_id=doc["subject_id"],
+                title=doc["title"],
+                content=doc["content"],
+                grade_level=doc.get("grade_level"),
+                source=doc.get("source")
+            )
+            created.append({"id": doc_id, "title": doc["title"], "subject_id": doc["subject_id"]})
+        except Exception as e:
+            errors.append({"title": doc["title"], "error": str(e)})
+    
+    return {
+        "message": f"Seeded {len(created)} knowledge documents",
+        "created": created,
+        "errors": errors
+    }
+
+
+@router.get("/debug/knowledge-documents")
+async def debug_knowledge_documents():
+    """Debug endpoint to check knowledge documents."""
+    from app.repositories.knowledge_service import KnowledgeService
+    
+    try:
+        subjects = KnowledgeService.get_all_subjects()
+        result = {
+            "subjects_count": len(subjects),
+            "subjects": subjects,
+            "documents_by_subject": {}
+        }
+        
+        for subject in subjects:
+            docs = KnowledgeService.get_knowledge_documents(subject["id"])
+            result["documents_by_subject"][subject["name"]] = {
+                "count": len(docs),
+                "documents": [{"id": d["id"], "title": d["title"], "grade_level": d.get("grade_level")} for d in docs]
+            }
+        
+        return result
+        
+    except Exception as e:
+        import traceback
+        return {
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
 
 

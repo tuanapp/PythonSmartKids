@@ -325,7 +325,7 @@ class KnowledgeService:
                 VALUES (%s, %s, %s, %s, %s)
                 RETURNING id
                 """,
-                (subject_id, title, content, grade_level, created_by)
+                (subject_id, title, content, grade_level, source)
             )
             
             doc_id = cursor.fetchone()[0]
