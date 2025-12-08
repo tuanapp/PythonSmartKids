@@ -57,10 +57,8 @@ class KnowledgeDocument(BaseModel):
     subject_id: int
     title: str
     content: str
-    summary: Optional[str] = None
-    metadata: Optional[dict] = None
     grade_level: Optional[int] = None
-    difficulty_level: Optional[int] = None
+    source: Optional[str] = None
     is_active: bool = True
 
 

@@ -614,7 +614,7 @@ async def get_subject(subject_id: int):
 async def get_subject_knowledge(
     subject_id: int,
     grade_level: int = None,
-    difficulty_level: int = None
+    level: int = None
 ):
     """Get knowledge documents for a subject."""
     from app.repositories.knowledge_service import KnowledgeService
@@ -626,7 +626,7 @@ async def get_subject_knowledge(
             raise HTTPException(status_code=404, detail="Subject not found")
         
         documents = KnowledgeService.get_knowledge_documents(
-            subject_id, grade_level, difficulty_level
+            subject_id, grade_level, level
         )
         return {"knowledge_documents": documents, "subject": subject}
     except HTTPException:
@@ -712,9 +712,9 @@ async def generate_knowledge_questions(request: dict):
         # Combine knowledge content (use first document or combine multiple)
         knowledge_content = knowledge_docs[0]['content']
         if len(knowledge_docs) > 1:
-            # Combine summaries or first portions of multiple documents
-            summaries = [doc.get('summary') or doc['content'][:500] for doc in knowledge_docs[:3]]
-            knowledge_content = "\n\n---\n\n".join(summaries)
+            # Combine first portions of multiple documents (no summary field in production)
+            content_excerpts = [doc['content'][:500] for doc in knowledge_docs[:3]]
+            knowledge_content = "\n\n---\n\n".join(content_excerpts)
         
         # Get user's attempt history for personalization
         user_history = KnowledgeService.get_user_knowledge_attempts(uid, subject_id, limit=20)
@@ -873,10 +873,8 @@ async def create_knowledge_document(request: dict, admin_key: str = ""):
     - subject_id: int (required)
     - title: str (required)
     - content: str (required)
-    - summary: str (optional)
-    - metadata: dict (optional)
+    - source: str (optional)
     - grade_level: int (optional, 4-7)
-    - difficulty_level: int (optional, 1-6)
     """
     from app.repositories.knowledge_service import KnowledgeService
     
@@ -902,10 +900,8 @@ async def create_knowledge_document(request: dict, admin_key: str = ""):
             subject_id=subject_id,
             title=title,
             content=content,
-            summary=request.get('summary'),
-            metadata=request.get('metadata'),
+            source=request.get('source'),
             grade_level=request.get('grade_level'),
-            difficulty_level=request.get('difficulty_level'),
             created_by=request.get('created_by', 'admin')
         )
         

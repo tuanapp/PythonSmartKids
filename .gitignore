@@ -19,3 +19,6 @@ __pycache__/
 # Keep all other files, including app/ source and tests/ folders
 !app/
 !app/tests/
+.env
+.env.development
+.env.production

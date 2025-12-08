@@ -775,6 +775,48 @@ class VercelMigrationManager:
             else:
                 messages.append("Knowledge documents table already exists")
             
+            # Check if knowledge_question_attempts table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'knowledge_question_attempts'
+                )
+            """)
+            knowledge_attempts_exists = cursor.fetchone()[0]
+            
+            if not knowledge_attempts_exists:
+                # Create the knowledge_question_attempts table
+                cursor.execute("""
+                    CREATE TABLE knowledge_question_attempts (
+                        id SERIAL PRIMARY KEY,
+                        uid VARCHAR(128) NOT NULL,
+                        subject_id INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+                        question TEXT NOT NULL,
+                        user_answer TEXT NOT NULL,
+                        correct_answer TEXT NOT NULL,
+                        evaluation_status VARCHAR(20) NOT NULL,
+                        ai_feedback TEXT,
+                        best_answer TEXT,
+                        improvement_tips TEXT,
+                        score FLOAT,
+                        difficulty_level INTEGER,
+                        topic VARCHAR(200),
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                """)
+                messages.append("Created knowledge_question_attempts table")
+                logger.info("Created knowledge_question_attempts table")
+                
+                # Create indexes for performance
+                cursor.execute("CREATE INDEX idx_knowledge_attempts_uid ON knowledge_question_attempts(uid)")
+                cursor.execute("CREATE INDEX idx_knowledge_attempts_subject ON knowledge_question_attempts(subject_id)")
+                cursor.execute("CREATE INDEX idx_knowledge_attempts_status ON knowledge_question_attempts(evaluation_status)")
+                cursor.execute("CREATE INDEX idx_knowledge_attempts_created ON knowledge_question_attempts(created_at DESC)")
+                messages.append("Created indexes on knowledge_question_attempts table")
+                logger.info("Created indexes on knowledge_question_attempts table")
+            else:
+                messages.append("Knowledge question attempts table already exists")
+            
             # Update migration version to 009
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) PRIMARY KEY)

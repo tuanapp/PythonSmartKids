@@ -96,7 +96,7 @@ class KnowledgeService:
     def get_knowledge_documents(
         subject_id: int,
         grade_level: Optional[int] = None,
-        difficulty_level: Optional[int] = None
+        level: Optional[int] = None
     ) -> List[dict]:
         """
         Get knowledge documents for a subject.
@@ -104,7 +104,7 @@ class KnowledgeService:
         Args:
             subject_id: ID of the subject
             grade_level: Optional grade level filter
-            difficulty_level: Optional difficulty level filter (1-6)
+            level: Optional question level (unused in DB, for compatibility)
             
         Returns:
             List of knowledge document dictionaries
@@ -114,8 +114,7 @@ class KnowledgeService:
             cursor = conn.cursor()
             
             query = """
-                SELECT id, subject_id, title, content, summary, metadata,
-                       grade_level, difficulty_level, is_active
+                SELECT id, subject_id, title, content, grade_level, source, is_active
                 FROM knowledge_documents
                 WHERE subject_id = %s AND is_active = true
             """
@@ -125,11 +124,7 @@ class KnowledgeService:
                 query += " AND (grade_level = %s OR grade_level IS NULL)"
                 params.append(grade_level)
             
-            if difficulty_level:
-                query += " AND (difficulty_level = %s OR difficulty_level IS NULL)"
-                params.append(difficulty_level)
-            
-            query += " ORDER BY difficulty_level ASC NULLS FIRST, created_at DESC"
+            query += " ORDER BY grade_level ASC NULLS FIRST, created_at DESC"
             
             cursor.execute(query, tuple(params))
             
@@ -303,11 +298,8 @@ class KnowledgeService:
         subject_id: int,
         title: str,
         content: str,
-        summary: Optional[str] = None,
-        metadata: Optional[dict] = None,
         grade_level: Optional[int] = None,
-        difficulty_level: Optional[int] = None,
-        created_by: Optional[str] = None
+        source: Optional[str] = None
     ) -> int:
         """
         Create a new knowledge document.
@@ -316,11 +308,8 @@ class KnowledgeService:
             subject_id: ID of the subject
             title: Document title
             content: Document content
-            summary: Optional summary
-            metadata: Optional metadata dict
             grade_level: Optional grade level (4-7)
-            difficulty_level: Optional difficulty level (1-6)
-            created_by: Optional creator identifier
+            source: Optional source/creator identifier
             
         Returns:
             ID of the created document
@@ -329,19 +318,14 @@ class KnowledgeService:
             conn = db_provider._get_connection()
             cursor = conn.cursor()
             
-            import json
-            metadata_json = json.dumps(metadata) if metadata else None
-            
             cursor.execute(
                 """
                 INSERT INTO knowledge_documents 
-                (subject_id, title, content, summary, metadata, 
-                 grade_level, difficulty_level, created_by)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (subject_id, title, content, grade_level, source)
+                VALUES (%s, %s, %s, %s, %s)
                 RETURNING id
                 """,
-                (subject_id, title, content, summary, metadata_json,
-                 grade_level, difficulty_level, created_by)
+                (subject_id, title, content, grade_level, created_by)
             )
             
             doc_id = cursor.fetchone()[0]
