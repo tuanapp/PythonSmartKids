@@ -102,6 +102,24 @@ class VercelMigrationManager:
             """)
             question_generations_exists = cursor.fetchone()[0]
             
+            # Check if subjects table exists (knowledge-based questions feature)
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'subjects'
+                )
+            """)
+            subjects_exists = cursor.fetchone()[0]
+            
+            # Check if knowledge_documents table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'knowledge_documents'
+                )
+            """)
+            knowledge_documents_exists = cursor.fetchone()[0]
+            
             cursor.close()
             conn.close()
             
@@ -116,15 +134,18 @@ class VercelMigrationManager:
                 'user_blocking_exists': user_blocking_exists,
                 'user_blocking_history_exists': user_blocking_history_exists,
                 'question_generations_exists': question_generations_exists,
+                'subjects_exists': subjects_exists,
+                'knowledge_documents_exists': knowledge_documents_exists,
                 'needs_migration': (
-                    current_version != '007' or  # Updated to latest version
+                    current_version != '009' or  # Updated to latest version (knowledge-based questions)
                     not notes_column_exists or 
                     not level_column_exists or
                     not prompts_table_exists or
                     not prompts_indexes_exist or
                     not user_blocking_exists or
                     not user_blocking_history_exists or
-                    not question_generations_exists
+                    not subjects_exists or
+                    not knowledge_documents_exists
                 )
             }
             
@@ -159,12 +180,16 @@ class VercelMigrationManager:
             tracking_result = self.add_question_generation_tracking_migration()
             logger.info(f"Question generation tracking migration result: {tracking_result['message']}")
             
+            # Ensure knowledge-based questions tables exist
+            knowledge_result = self.add_knowledge_based_questions_migration()
+            logger.info(f"Knowledge-based questions migration result: {knowledge_result['message']}")
+            
             # Verify the migration was successful
             status = self.check_migration_status()
             
             return {
                 'success': True,
-                'message': 'All migrations applied successfully (including question generation tracking)',
+                'message': 'All migrations applied successfully (including knowledge-based questions)',
                 'final_status': status,
                 'migrations_applied': [
                     'Base tables (attempts, question_patterns, users)',
@@ -175,7 +200,9 @@ class VercelMigrationManager:
                     'User blocking fields on users',
                     'User blocking history table',
                     'LLM interactions table (question generation tracking)',
-                    'Question generations table (daily limit tracking)'
+                    'Question generations table (daily limit tracking)',
+                    'Subjects table (knowledge-based questions)',
+                    'Knowledge documents table'
                 ]
             }
             
@@ -619,6 +646,130 @@ class VercelMigrationManager:
             
         except Exception as e:
             logger.error(f"Error in migration 008: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def add_knowledge_based_questions_migration(self) -> Dict[str, Any]:
+        """
+        Migration 009: Add knowledge-based questions feature.
+        Creates subjects and knowledge_documents tables for AI-powered educational content.
+        """
+        try:
+            conn = self.db_provider._get_connection()
+            cursor = conn.cursor()
+            messages = []
+            
+            logger.info("Starting migration 009: Add knowledge-based questions tables")
+            
+            # Check if subjects table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'subjects'
+                )
+            """)
+            subjects_exists = cursor.fetchone()[0]
+            
+            if not subjects_exists:
+                # Create the subjects table
+                cursor.execute("""
+                    CREATE TABLE subjects (
+                        id SERIAL PRIMARY KEY,
+                        name VARCHAR(100) NOT NULL UNIQUE,
+                        display_name VARCHAR(200) NOT NULL,
+                        description TEXT,
+                        icon VARCHAR(50),
+                        color VARCHAR(20),
+                        is_active BOOLEAN DEFAULT TRUE NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                """)
+                messages.append("Created subjects table")
+                logger.info("Created subjects table")
+                
+                # Create index on subjects.name
+                cursor.execute("CREATE INDEX idx_subjects_name ON subjects(name)")
+                cursor.execute("CREATE INDEX idx_subjects_is_active ON subjects(is_active)")
+                messages.append("Created indexes on subjects table")
+                
+                # Insert default subjects
+                cursor.execute("""
+                    INSERT INTO subjects (name, display_name, description, icon, color) VALUES
+                    ('science', 'Science', 'General science topics including physics, chemistry, and biology', '🔬', '#4CAF50'),
+                    ('history', 'History', 'World history and historical events', '📜', '#795548'),
+                    ('geography', 'Geography', 'Countries, capitals, and geographical features', '🌍', '#2196F3'),
+                    ('nature', 'Nature', 'Animals, plants, and the natural world', '🌿', '#8BC34A'),
+                    ('space', 'Space', 'Astronomy, planets, and the universe', '🚀', '#673AB7'),
+                    ('technology', 'Technology', 'Computers, inventions, and modern technology', '💻', '#607D8B')
+                """)
+                messages.append("Inserted default subjects")
+                logger.info("Inserted default subjects")
+            else:
+                messages.append("Subjects table already exists")
+            
+            # Check if knowledge_documents table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'knowledge_documents'
+                )
+            """)
+            knowledge_documents_exists = cursor.fetchone()[0]
+            
+            if not knowledge_documents_exists:
+                # Create the knowledge_documents table
+                cursor.execute("""
+                    CREATE TABLE knowledge_documents (
+                        id SERIAL PRIMARY KEY,
+                        subject_id INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+                        title VARCHAR(300) NOT NULL,
+                        content TEXT NOT NULL,
+                        grade_level INTEGER,
+                        source VARCHAR(500),
+                        is_active BOOLEAN DEFAULT TRUE NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                """)
+                messages.append("Created knowledge_documents table")
+                logger.info("Created knowledge_documents table")
+                
+                # Create indexes
+                cursor.execute("CREATE INDEX idx_knowledge_documents_subject_id ON knowledge_documents(subject_id)")
+                cursor.execute("CREATE INDEX idx_knowledge_documents_grade_level ON knowledge_documents(grade_level)")
+                cursor.execute("CREATE INDEX idx_knowledge_documents_is_active ON knowledge_documents(is_active)")
+                messages.append("Created indexes on knowledge_documents table")
+                logger.info("Created indexes on knowledge_documents table")
+            else:
+                messages.append("Knowledge documents table already exists")
+            
+            # Update migration version to 009
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) PRIMARY KEY)
+            """)
+            cursor.execute("""
+                DELETE FROM alembic_version WHERE version_num IN ('009', '008', '007', '2d3eefae954c')
+            """)
+            cursor.execute("""
+                INSERT INTO alembic_version (version_num) VALUES ('009')
+                ON CONFLICT (version_num) DO NOTHING
+            """)
+            messages.append("Updated alembic version to 009")
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            return {
+                'success': True,
+                'message': '; '.join(messages) if messages else 'Migration 009 already applied'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in migration 009: {e}")
             return {
                 'success': False,
                 'error': str(e)
