@@ -30,22 +30,15 @@ class KnowledgeService:
             conn = db_provider.get_connection()
             cursor = conn.cursor()
             
-            if grade_level:
-                query = """
-                    SELECT id, name, display_name, description, icon, grade_levels, is_active
-                    FROM subjects
-                    WHERE is_active = true AND %s = ANY(grade_levels)
-                    ORDER BY name
-                """
-                cursor.execute(query, (grade_level,))
-            else:
-                query = """
-                    SELECT id, name, display_name, description, icon, grade_levels, is_active
-                    FROM subjects
-                    WHERE is_active = true
-                    ORDER BY name
-                """
-                cursor.execute(query)
+            # Note: grade_level filtering would require knowledge_documents join
+            # For now, return all active subjects
+            query = """
+                SELECT id, name, display_name, description, icon, color, is_active
+                FROM subjects
+                WHERE is_active = true
+                ORDER BY name
+            """
+            cursor.execute(query)
             
             columns = [desc[0] for desc in cursor.description]
             results = []
@@ -79,7 +72,7 @@ class KnowledgeService:
             
             cursor.execute(
                 """
-                SELECT id, name, display_name, description, icon, grade_levels, is_active
+                SELECT id, name, display_name, description, icon, color, is_active
                 FROM subjects 
                 WHERE id = %s AND is_active = true
                 """,
@@ -91,7 +84,7 @@ class KnowledgeService:
             conn.close()
             
             if row:
-                columns = ['id', 'name', 'display_name', 'description', 'icon', 'grade_levels', 'is_active']
+                columns = ['id', 'name', 'display_name', 'description', 'icon', 'color', 'is_active']
                 return dict(zip(columns, row))
             return None
             

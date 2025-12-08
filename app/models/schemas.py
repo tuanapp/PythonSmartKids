@@ -47,8 +47,8 @@ class Subject(BaseModel):
     display_name: str
     description: Optional[str] = None
     icon: Optional[str] = None
+    color: Optional[str] = None
     is_active: bool = True
-    grade_levels: List[int] = []
 
 
 class KnowledgeDocument(BaseModel):
