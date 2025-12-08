@@ -708,7 +708,36 @@ class VercelMigrationManager:
                 messages.append("Inserted default subjects")
                 logger.info("Inserted default subjects")
             else:
-                messages.append("Subjects table already exists")
+                # Table exists, check for missing columns and add them
+                cursor.execute("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'subjects'
+                """)
+                existing_columns = {row[0] for row in cursor.fetchall()}
+                
+                # Add color column if missing
+                if 'color' not in existing_columns:
+                    cursor.execute("ALTER TABLE subjects ADD COLUMN color VARCHAR(20)")
+                    messages.append("Added color column to subjects table")
+                    logger.info("Added color column to subjects table")
+                    
+                    # Update existing subjects with default colors
+                    cursor.execute("""
+                        UPDATE subjects SET color = CASE name
+                            WHEN 'science' THEN '#4CAF50'
+                            WHEN 'history' THEN '#795548'
+                            WHEN 'geography' THEN '#2196F3'
+                            WHEN 'nature' THEN '#8BC34A'
+                            WHEN 'space' THEN '#673AB7'
+                            WHEN 'technology' THEN '#607D8B'
+                            ELSE '#9E9E9E'
+                        END
+                        WHERE color IS NULL
+                    """)
+                    messages.append("Updated existing subjects with default colors")
+                else:
+                    messages.append("Subjects table already exists with all columns")
             
             # Check if knowledge_documents table exists
             cursor.execute("""

@@ -7,7 +7,7 @@ Create Date: 2025-12-08 10:00:00.000000
 """
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB, ARRAY
+from sqlalchemy.dialects.postgresql import JSONB
 
 # revision identifiers, used by Alembic.
 revision = '007'
@@ -27,8 +27,8 @@ def upgrade():
         sa.Column('display_name', sa.String(100), nullable=False),
         sa.Column('description', sa.Text(), nullable=True),
         sa.Column('icon', sa.String(50), nullable=True),
+        sa.Column('color', sa.String(20), nullable=True),
         sa.Column('is_active', sa.Boolean(), default=True),
-        sa.Column('grade_levels', ARRAY(sa.Integer()), nullable=True),
         sa.Column('created_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP')),
         sa.Column('updated_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP')),
     )
@@ -97,10 +97,13 @@ def upgrade():
     
     # Seed initial subjects
     op.execute("""
-        INSERT INTO subjects (name, display_name, description, icon, is_active, grade_levels) VALUES
-        ('science', 'Science 🔬', 'General science questions covering biology, chemistry, physics', '🔬', true, ARRAY[4,5,6,7]),
-        ('english', 'English 📚', 'Grammar, vocabulary, reading comprehension', '📚', true, ARRAY[4,5,6,7]),
-        ('french', 'French 🇫🇷', 'French language learning and practice', '🇫🇷', true, ARRAY[4,5,6,7])
+        INSERT INTO subjects (name, display_name, description, icon, color, is_active) VALUES
+        ('science', 'Science', 'General science questions covering biology, chemistry, physics', '🔬', '#4CAF50', true),
+        ('history', 'History', 'World history and historical events', '📜', '#795548', true),
+        ('geography', 'Geography', 'Countries, capitals, and geographical features', '🌍', '#2196F3', true),
+        ('nature', 'Nature', 'Animals, plants, and the natural world', '🌿', '#8BC34A', true),
+        ('space', 'Space', 'Astronomy, planets, and the universe', '🚀', '#673AB7', true),
+        ('technology', 'Technology', 'Computers, inventions, and modern technology', '💻', '#607D8B', true)
     """)
 
 

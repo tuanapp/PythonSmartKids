@@ -528,6 +528,48 @@ async def debug_daily_count(uid: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/debug/subjects-schema")
+async def debug_subjects_schema():
+    """Debug endpoint to check subjects table schema and data"""
+    try:
+        db = DatabaseFactory.get_provider()
+        conn = db._get_connection()
+        cursor = conn.cursor()
+        
+        # Check subjects table columns
+        cursor.execute("""
+            SELECT column_name, data_type 
+            FROM information_schema.columns 
+            WHERE table_name = 'subjects'
+            ORDER BY ordinal_position
+        """)
+        columns = [{'name': row[0], 'type': row[1]} for row in cursor.fetchall()]
+        column_names = [col['name'] for col in columns]
+        
+        # Try to get subjects data with only existing columns
+        if columns:
+            cursor.execute(f"SELECT * FROM subjects LIMIT 5")
+            rows = cursor.fetchall()
+            sample_data = []
+            for row in rows:
+                sample_data.append(dict(zip(column_names, [str(v) if v is not None else None for v in row])))
+        else:
+            sample_data = []
+        
+        cursor.close()
+        conn.close()
+        
+        return {
+            'table_exists': len(columns) > 0,
+            'columns': columns,
+            'column_names': column_names,
+            'sample_data': sample_data
+        }
+    except Exception as e:
+        logger.error(f"Error in subjects debug endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ============================================================================
 # Knowledge-Based Question Game Routes
 # ============================================================================
