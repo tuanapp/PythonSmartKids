@@ -704,9 +704,20 @@ async def generate_knowledge_questions(request: dict):
         )
         
         if not knowledge_docs:
+            # Get all docs for debugging
+            all_docs = KnowledgeService.get_knowledge_documents(subject_id, None, None)
             raise HTTPException(
                 status_code=404,
-                detail=f"No knowledge documents found for subject '{subject['display_name']}'"
+                detail={
+                    "message": f"No knowledge documents found for subject '{subject['display_name']}'",
+                    "debug": {
+                        "subject_id": subject_id,
+                        "user_grade": user_grade,
+                        "level_filter": level,
+                        "all_docs_count": len(all_docs),
+                        "all_docs": [{"id": d["id"], "title": d["title"], "grade_level": d.get("grade_level")} for d in all_docs[:5]]
+                    }
+                }
             )
         
         # Combine knowledge content (use first document or combine multiple)
