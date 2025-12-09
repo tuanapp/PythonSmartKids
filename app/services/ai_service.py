@@ -854,7 +854,8 @@ Generate ONLY valid JSON without any markdown formatting, explanations, or wrapp
                 'generation_time_ms': response_time_ms,
                 'count': len(validated_questions),
                 'prompt_id': prompt_id,
-                'used_fallback': is_fallback_attempt
+                'used_fallback': is_fallback_attempt,
+                'prompt_used': prompt_content
             }
             
         except json.JSONDecodeError as e:

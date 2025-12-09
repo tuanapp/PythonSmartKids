@@ -757,8 +757,10 @@ async def generate_knowledge_questions(request: dict):
             "questions": result['questions'],
             "validation_result": {
                 "ai_model": result['ai_model'],
-                "generation_time_ms": result['generation_time_ms']
+                "generation_time_ms": result['generation_time_ms'],
+                "used_fallback": result.get('used_fallback', False)
             },
+            "prompt_used": result.get('prompt_used'),
             "daily_count": daily_count + 1,
             "daily_limit": max_daily,
             "is_premium": is_premium,
