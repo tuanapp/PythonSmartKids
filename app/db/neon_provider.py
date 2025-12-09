@@ -417,7 +417,7 @@ class NeonProvider(DatabaseProvider):
             
             cursor.execute("""
                 SELECT uid, email, name, display_name, grade_level, subscription, registration_date,
-                       is_blocked, blocked_reason, blocked_at, blocked_by, debug
+                       is_blocked, blocked_reason, blocked_at, blocked_by, is_debug
                 FROM users
                 WHERE uid = %s
             """, (uid,))
@@ -445,7 +445,7 @@ class NeonProvider(DatabaseProvider):
             
             cursor.execute("""
                 SELECT uid, email, name, display_name, grade_level, subscription, registration_date,
-                       is_blocked, blocked_reason, blocked_at, blocked_by, debug
+                       is_blocked, blocked_reason, blocked_at, blocked_by, is_debug
                 FROM users
                 WHERE email = %s
             """, (email,))

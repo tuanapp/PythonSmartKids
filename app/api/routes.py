@@ -69,7 +69,9 @@ async def get_user(uid: str):
             "daily_count": daily_count,
             "daily_limit": max_daily,
             "is_premium": is_premium,
-            "debug": user_data.get("debug", False)
+            "is_blocked": user_data.get("is_blocked", False),
+            "blocked_reason": user_data.get("blocked_reason"),
+            "is_debug": user_data.get("is_debug", False)
         }
     except HTTPException:
         raise
