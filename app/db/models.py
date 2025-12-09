@@ -90,6 +90,9 @@ class User(Base):
     blocked_at = Column(DateTime(timezone=True), nullable=True)
     blocked_by = Column(String, nullable=True)
     
+    # Debug mode - when True, enables API debug panel in frontend
+    debug = Column(Boolean, default=False, nullable=False)
+    
     # Timestamps (auto-managed by database)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

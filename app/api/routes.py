@@ -68,7 +68,8 @@ async def get_user(uid: str):
             "registrationDate": user_data["registration_date"],
             "daily_count": daily_count,
             "daily_limit": max_daily,
-            "is_premium": is_premium
+            "is_premium": is_premium,
+            "debug": user_data.get("debug", False)
         }
     except HTTPException:
         raise
