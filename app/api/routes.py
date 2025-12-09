@@ -819,12 +819,16 @@ async def evaluate_answers(request: dict):
         ]
         
         # Evaluate answers using AI
-        results = evaluate_answers_with_ai(
+        ai_result = evaluate_answers_with_ai(
             answers=answers,
             subject_name=subject['display_name'],
             uid=uid,
             is_live=is_live
         )
+        
+        # Extract evaluations and validation_result from AI response
+        results = ai_result.get('evaluations', [])
+        validation_result = ai_result.get('validation_result', {})
         
         # Save attempts to database
         for i, result in enumerate(results):
@@ -865,7 +869,8 @@ async def evaluate_answers(request: dict):
                 "incorrect": incorrect_count,
                 "average_score": round(total_score, 2)
             },
-            "subject": subject
+            "subject": subject,
+            "validation_result": validation_result
         }
         
     except HTTPException:

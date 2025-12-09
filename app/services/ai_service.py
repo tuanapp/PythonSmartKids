@@ -1002,7 +1002,14 @@ Generate ONLY valid JSON without markdown formatting or extra text."""
                     logger.warning(f"Failed to log prompt: {log_error}")
             
             logger.info(f"Successfully evaluated {len(evaluations)} answers in {response_time_ms}ms using {model_name}")
-            return evaluations
+            return {
+                'evaluations': evaluations,
+                'validation_result': {
+                    'ai_model': model_name,
+                    'generation_time_ms': response_time_ms,
+                    'used_fallback': is_fallback_attempt
+                }
+            }
             
         except json.JSONDecodeError as e:
             last_error = f"JSON parse error from {model_name}: {e}"
@@ -1029,7 +1036,7 @@ Generate ONLY valid JSON without markdown formatting or extra text."""
     return _fallback_evaluation(answers, f"All models failed. Last error: {last_error}")
 
 
-def _fallback_evaluation(answers: List[dict], ai_error: str = None) -> List[dict]:
+def _fallback_evaluation(answers: List[dict], ai_error: str = None) -> dict:
     """
     Fallback evaluation when AI fails - simple string comparison.
     
@@ -1038,11 +1045,11 @@ def _fallback_evaluation(answers: List[dict], ai_error: str = None) -> List[dict
         ai_error: Optional error message from the AI failure
         
     Returns:
-        List of basic evaluation results
+        Dict with evaluations list and validation_result
     """
     fallback_msg = f'Evaluated using simple comparison (AI unavailable: {ai_error})' if ai_error else 'Evaluated using simple comparison (AI unavailable)'
     
-    return [
+    evaluations = [
         {
             'question': ans['question'],
             'user_answer': ans['user_answer'],
@@ -1055,3 +1062,13 @@ def _fallback_evaluation(answers: List[dict], ai_error: str = None) -> List[dict
         }
         for ans in answers
     ]
+    
+    return {
+        'evaluations': evaluations,
+        'validation_result': {
+            'ai_model': 'fallback_simple_comparison',
+            'generation_time_ms': 0,
+            'used_fallback': True,
+            'error': ai_error
+        }
+    }
