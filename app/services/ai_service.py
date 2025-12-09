@@ -767,82 +767,121 @@ Generate ONLY valid JSON without any markdown formatting, explanations, or wrapp
     # Start timing the API call
     api_start_time = time.time()
     response_time_ms = None
-    model_name = AI_BRIDGE_MODEL
     
-    try:
-        completion = client.chat.completions.create(
-            model=AI_BRIDGE_MODEL,
-            messages=[prompt],
-            temperature=0.7
-        )
+    # Determine which models to try (primary + fallback)
+    primary_model = AI_BRIDGE_MODEL
+    fallback_model = AI_FALLBACK_MODEL_1
+    
+    # List of models to try in order
+    models_to_try = [primary_model]
+    # Only add fallback if it's different from primary and not empty
+    if fallback_model and fallback_model != primary_model:
+        models_to_try.append(fallback_model)
+    
+    last_error = None
+    last_error_model = None
+    response_text = None
+    
+    for attempt_index, model_name in enumerate(models_to_try):
+        is_fallback_attempt = attempt_index > 0
         
-        response_text = completion.choices[0].message.content
-        response_time_ms = int((time.time() - api_start_time) * 1000)
+        if is_fallback_attempt:
+            logger.info(f"Primary model failed, trying fallback model: {model_name}")
+            # Reset timing for fallback attempt
+            api_start_time = time.time()
         
-        # Clean response text (remove markdown code blocks if present)
-        cleaned_response = response_text.strip()
-        if cleaned_response.startswith('```'):
-            # Remove markdown code block wrapper
-            lines = cleaned_response.split('\n')
-            if lines[0].startswith('```'):
-                lines = lines[1:]
-            if lines and lines[-1].strip() == '```':
-                lines = lines[:-1]
-            cleaned_response = '\n'.join(lines)
-        
-        # Parse and validate response
-        questions = json.loads(cleaned_response)
-        
-        # Validate structure and ensure all questions have required fields
-        validated_questions = []
-        for i, q in enumerate(questions):
-            validated_questions.append({
-                'number': q.get('number', i + 1),
-                'topic': q.get('topic', 'General'),
-                'question': q.get('question', ''),
-                'answer': str(q.get('answer', '')),
-                'answer_type': q.get('answer_type', 'text'),
-                'difficulty': q.get('difficulty', 3)
-            })
-        
-        # Extract token usage
-        prompt_tokens = completion.usage.prompt_tokens if hasattr(completion.usage, 'prompt_tokens') else None
-        completion_tokens = completion.usage.completion_tokens if hasattr(completion.usage, 'completion_tokens') else None
-        total_tokens = completion.usage.total_tokens if hasattr(completion.usage, 'total_tokens') else None
-        
-        # Log prompt usage
         try:
-            prompt_id = prompt_service.log_llm_interaction(
-                uid=uid,
-                request_text=prompt_content,
-                response_text=response_text,
-                model_name=model_name,
-                is_live=is_live,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=total_tokens,
-                response_time_ms=response_time_ms,
-                status='success'
+            completion = client.chat.completions.create(
+                model=model_name,
+                messages=[prompt],
+                temperature=0.7
             )
-        except Exception as log_error:
-            logger.warning(f"Failed to log prompt: {log_error}")
-        
-        return {
-            'questions': validated_questions,
-            'ai_model': model_name,
-            'generation_time_ms': response_time_ms,
-            'count': len(validated_questions),
-            'prompt_id': prompt_id
-        }
-        
-    except json.JSONDecodeError as e:
-        logger.error(f"Error parsing AI response as JSON: {e}")
-        logger.error(f"Response was: {response_text if 'response_text' in dir() else 'N/A'}")
-        raise ValueError(f"AI returned invalid JSON: {e}")
-        
-    except Exception as e:
-        logger.error(f"Error generating knowledge-based questions: {e}")
-        raise
+            
+            response_text = completion.choices[0].message.content
+            response_time_ms = int((time.time() - api_start_time) * 1000)
+            
+            # Clean response text (remove markdown code blocks if present)
+            cleaned_response = response_text.strip()
+            if cleaned_response.startswith('```'):
+                # Remove markdown code block wrapper
+                lines = cleaned_response.split('\n')
+                if lines[0].startswith('```'):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == '```':
+                    lines = lines[:-1]
+                cleaned_response = '\n'.join(lines)
+            
+            # Parse and validate response
+            questions = json.loads(cleaned_response)
+            
+            # Validate structure and ensure all questions have required fields
+            validated_questions = []
+            for i, q in enumerate(questions):
+                validated_questions.append({
+                    'number': q.get('number', i + 1),
+                    'topic': q.get('topic', 'General'),
+                    'question': q.get('question', ''),
+                    'answer': str(q.get('answer', '')),
+                    'answer_type': q.get('answer_type', 'text'),
+                    'difficulty': q.get('difficulty', 3)
+                })
+            
+            # Extract token usage
+            prompt_tokens = completion.usage.prompt_tokens if hasattr(completion.usage, 'prompt_tokens') else None
+            completion_tokens = completion.usage.completion_tokens if hasattr(completion.usage, 'completion_tokens') else None
+            total_tokens = completion.usage.total_tokens if hasattr(completion.usage, 'total_tokens') else None
+            
+            # Log prompt usage
+            try:
+                prompt_id = prompt_service.log_llm_interaction(
+                    uid=uid,
+                    request_text=prompt_content,
+                    response_text=response_text,
+                    model_name=model_name,
+                    is_live=is_live,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    response_time_ms=response_time_ms,
+                    status='success'
+                )
+            except Exception as log_error:
+                logger.warning(f"Failed to log prompt: {log_error}")
+            
+            return {
+                'questions': validated_questions,
+                'ai_model': model_name,
+                'generation_time_ms': response_time_ms,
+                'count': len(validated_questions),
+                'prompt_id': prompt_id,
+                'used_fallback': is_fallback_attempt
+            }
+            
+        except json.JSONDecodeError as e:
+            last_error = f"AI returned invalid JSON: {e}"
+            last_error_model = model_name
+            logger.error(f"Error parsing AI response as JSON from {model_name}: {e}")
+            logger.error(f"Response was: {response_text if response_text else 'N/A'}")
+            
+            # If this was the last model, raise the error
+            if attempt_index == len(models_to_try) - 1:
+                raise ValueError(last_error)
+            # Otherwise continue to next model
+            continue
+            
+        except Exception as e:
+            last_error = str(e)
+            last_error_model = model_name
+            logger.error(f"Error generating knowledge-based questions with {model_name}: {e}")
+            
+            # If this was the last model, raise the error
+            if attempt_index == len(models_to_try) - 1:
+                raise
+            # Otherwise continue to next model
+            continue
+    
+    # If we get here, all models failed
+    raise ValueError(f"All models failed. Last error from {last_error_model}: {last_error}")
 
 
 def evaluate_answers_with_ai(
