@@ -644,7 +644,7 @@ async def generate_knowledge_questions(request: dict):
     Request body:
     - uid: str (required) - Firebase User UID
     - subject_id: int (required) - Subject ID
-    - count: int (optional, default=10) - Number of questions to generate (1-50)
+    - count: int (optional, default=3) - Number of questions to generate (1-50)
     - level: int (optional) - Difficulty level filter (1-6)
     - is_live: int (optional, default=1) - 1=live, 0=test
     """
@@ -654,7 +654,7 @@ async def generate_knowledge_questions(request: dict):
     # Extract and validate parameters
     uid = request.get('uid')
     subject_id = request.get('subject_id')
-    count = request.get('count', 10)
+    count = request.get('count', 3)  # Default to 3 questions
     level = request.get('level')
     is_live = request.get('is_live', 1)
     
