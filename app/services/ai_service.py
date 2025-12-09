@@ -943,69 +943,105 @@ Generate ONLY valid JSON without markdown formatting or extra text."""
     
     logger.info(f"Evaluating {len(answers)} answers for {subject_name}")
     
-    api_start_time = time.time()
+    # Determine which models to try (primary + fallback)
+    primary_model = AI_BRIDGE_MODEL
+    fallback_model = AI_FALLBACK_MODEL_1
     
-    try:
-        completion = client.chat.completions.create(
-            model=AI_BRIDGE_MODEL,
-            messages=[prompt],
-            temperature=0.3  # Lower temperature for more consistent evaluation
-        )
+    # List of models to try in order
+    models_to_try = [primary_model]
+    if fallback_model and fallback_model != primary_model:
+        models_to_try.append(fallback_model)
+    
+    last_error = None
+    last_error_model = None
+    response_text = None
+    
+    for attempt_index, model_name in enumerate(models_to_try):
+        is_fallback_attempt = attempt_index > 0
         
-        response_text = completion.choices[0].message.content
-        response_time_ms = int((time.time() - api_start_time) * 1000)
+        if is_fallback_attempt:
+            logger.info(f"Primary model failed for evaluation, trying fallback: {model_name}")
         
-        # Clean response text
-        cleaned_response = response_text.strip()
-        if cleaned_response.startswith('```'):
-            lines = cleaned_response.split('\n')
-            if lines[0].startswith('```'):
-                lines = lines[1:]
-            if lines and lines[-1].strip() == '```':
-                lines = lines[:-1]
-            cleaned_response = '\n'.join(lines)
+        api_start_time = time.time()
         
-        evaluations = json.loads(cleaned_response)
-        
-        # Log prompt usage
-        if uid:
-            try:
-                prompt_service.log_llm_interaction(
-                    uid=uid,
-                    request_text=prompt_content,
-                    response_text=response_text,
-                    model_name=AI_BRIDGE_MODEL,
-                    is_live=is_live,
-                    response_time_ms=response_time_ms,
-                    status='success'
-                )
-            except Exception as log_error:
-                logger.warning(f"Failed to log prompt: {log_error}")
-        
-        logger.info(f"Successfully evaluated {len(evaluations)} answers in {response_time_ms}ms")
-        return evaluations
-        
-    except json.JSONDecodeError as e:
-        logger.error(f"Error parsing AI evaluation response as JSON: {e}")
-        # Fallback to simple comparison
-        return _fallback_evaluation(answers)
-        
-    except Exception as e:
-        logger.error(f"Error evaluating answers: {e}")
-        # Fallback to simple comparison
-        return _fallback_evaluation(answers)
+        try:
+            completion = client.chat.completions.create(
+                model=model_name,
+                messages=[prompt],
+                temperature=0.3  # Lower temperature for more consistent evaluation
+            )
+            
+            response_text = completion.choices[0].message.content
+            response_time_ms = int((time.time() - api_start_time) * 1000)
+            
+            # Clean response text
+            cleaned_response = response_text.strip()
+            if cleaned_response.startswith('```'):
+                lines = cleaned_response.split('\n')
+                if lines[0].startswith('```'):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == '```':
+                    lines = lines[:-1]
+                cleaned_response = '\n'.join(lines)
+            
+            evaluations = json.loads(cleaned_response)
+            
+            # Log prompt usage
+            if uid:
+                try:
+                    prompt_service.log_llm_interaction(
+                        uid=uid,
+                        request_text=prompt_content,
+                        response_text=response_text,
+                        model_name=model_name,
+                        is_live=is_live,
+                        response_time_ms=response_time_ms,
+                        status='success'
+                    )
+                except Exception as log_error:
+                    logger.warning(f"Failed to log prompt: {log_error}")
+            
+            logger.info(f"Successfully evaluated {len(evaluations)} answers in {response_time_ms}ms using {model_name}")
+            return evaluations
+            
+        except json.JSONDecodeError as e:
+            last_error = f"JSON parse error from {model_name}: {e}"
+            last_error_model = model_name
+            logger.error(f"Error parsing AI evaluation response as JSON from {model_name}: {e}")
+            logger.error(f"Response was: {response_text if response_text else 'N/A'}")
+            
+            # If this was the last model, fallback
+            if attempt_index == len(models_to_try) - 1:
+                return _fallback_evaluation(answers, last_error)
+            continue
+            
+        except Exception as e:
+            last_error = f"AI error from {model_name}: {str(e)}"
+            last_error_model = model_name
+            logger.error(f"Error evaluating answers with {model_name}: {e}")
+            
+            # If this was the last model, fallback
+            if attempt_index == len(models_to_try) - 1:
+                return _fallback_evaluation(answers, last_error)
+            continue
+    
+    # If we get here, all models failed
+    return _fallback_evaluation(answers, f"All models failed. Last error: {last_error}")
 
 
-def _fallback_evaluation(answers: List[dict]) -> List[dict]:
+def _fallback_evaluation(answers: List[dict], ai_error: str = None) -> List[dict]:
     """
     Fallback evaluation when AI fails - simple string comparison.
     
     Args:
         answers: List of {question, user_answer, correct_answer}
+        ai_error: Optional error message from the AI failure
         
     Returns:
         List of basic evaluation results
     """
+    fallback_msg = f'Evaluated using simple comparison (AI unavailable: {ai_error})' if ai_error else 'Evaluated using simple comparison (AI unavailable)'
+    
     return [
         {
             'question': ans['question'],
@@ -1013,7 +1049,7 @@ def _fallback_evaluation(answers: List[dict]) -> List[dict]:
             'correct_answer': ans['correct_answer'],
             'status': 'correct' if ans['user_answer'].strip().lower() == ans['correct_answer'].strip().lower() else 'incorrect',
             'score': 1.0 if ans['user_answer'].strip().lower() == ans['correct_answer'].strip().lower() else 0.0,
-            'ai_feedback': 'Evaluated using simple comparison (AI unavailable)',
+            'ai_feedback': fallback_msg,
             'best_answer': ans['correct_answer'],
             'improvement_tips': None if ans['user_answer'].strip().lower() == ans['correct_answer'].strip().lower() else 'Review the correct answer and try again.'
         }
