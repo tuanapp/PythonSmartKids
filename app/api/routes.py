@@ -650,6 +650,7 @@ async def generate_knowledge_questions(request: dict):
     - count: int (optional, default=3) - Number of questions to generate (1-50)
     - level: int (optional) - Difficulty level filter (1-6)
     - is_live: int (optional, default=1) - 1=live, 0=test
+    - focus_weak_areas: bool (optional, default=False) - If True, focus on previous wrong answers; if False, generate fresh questions only
     """
     from app.repositories.knowledge_service import KnowledgeService
     from app.services.ai_service import generate_knowledge_based_questions
@@ -660,6 +661,7 @@ async def generate_knowledge_questions(request: dict):
     count = request.get('count', 3)  # Default to 3 questions
     level = request.get('level')
     is_live = request.get('is_live', 1)
+    focus_weak_areas = request.get('focus_weak_areas', False)  # Default to fresh questions
     
     if not uid:
         raise HTTPException(status_code=400, detail="uid is required")
@@ -742,7 +744,8 @@ async def generate_knowledge_questions(request: dict):
             count=count,
             level=level,
             user_history=user_history,
-            is_live=is_live
+            is_live=is_live,
+            focus_weak_areas=focus_weak_areas
         )
         
         # Log usage

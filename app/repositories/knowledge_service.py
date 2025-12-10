@@ -286,7 +286,11 @@ class KnowledgeService:
             cursor.close()
             conn.close()
             
-            logger.debug(f"Retrieved {len(results)} knowledge attempts for user {uid}")
+            logger.debug(f"Retrieved {len(results)} knowledge attempts for user {uid}, subject_id={subject_id}")
+            if results:
+                # Log first attempt for debugging
+                first = results[0]
+                logger.debug(f"Sample attempt: subject_id={first.get('subject_id')} (type: {type(first.get('subject_id'))}), eval_status='{first.get('evaluation_status')}'")
             return results
             
         except Exception as e:

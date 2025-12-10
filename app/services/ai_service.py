@@ -673,7 +673,8 @@ def generate_knowledge_based_questions(
     count: int = 10,
     level: Optional[int] = None,
     user_history: Optional[List[dict]] = None,
-    is_live: int = 1
+    is_live: int = 1,
+    focus_weak_areas: bool = False
 ) -> dict:
     """
     Generate questions based on knowledge document content.
@@ -687,6 +688,7 @@ def generate_knowledge_based_questions(
         level: Difficulty level (1-6)
         user_history: User's previous attempts for personalization
         is_live: 1=live production call, 0=test/local call
+        focus_weak_areas: If True, focus on previous wrong answers; if False, generate fresh questions only
     
     Returns:
         Dict with questions array and metadata, including prompt_id for tracking
@@ -697,25 +699,36 @@ def generate_knowledge_based_questions(
     
     # Build context from user history
     weak_areas = []
-    strong_areas = []
+    previously_asked = []
+    
     if user_history:
+        logger.debug(f"Processing {len(user_history)} attempts for subject_id={subject_id} (type: {type(subject_id)})")
         for attempt in user_history:
-            if attempt.get('subject_id') == subject_id:
-                if attempt.get('evaluation_status') in ['incorrect', 'partial']:
+            # Ensure type-safe comparison (database may return int or string)
+            attempt_subject_id = attempt.get('subject_id')
+            if str(attempt_subject_id) == str(subject_id):
+                eval_status = attempt.get('evaluation_status', '').lower() if attempt.get('evaluation_status') else ''
+                logger.debug(f"Attempt: subject_id={attempt_subject_id}, eval_status='{eval_status}'")
+                
+                # Collect previously asked questions for fresh mode
+                if attempt.get('question'):
+                    previously_asked.append(attempt['question'])
+                
+                # Only collect weak areas when focus mode is ON
+                if focus_weak_areas and eval_status in ['incorrect', 'partial']:
                     weak_areas.append({
                         'question': attempt['question'],
                         'user_answer': attempt.get('user_answer', ''),
                         'correct_answer': attempt['correct_answer']
                     })
-                elif attempt.get('evaluation_status') == 'correct':
-                    strong_areas.append({
-                        'question': attempt['question'],
-                        'correct_answer': attempt['correct_answer']
-                    })
+            else:
+                logger.debug(f"Subject ID mismatch: attempt has {attempt_subject_id} (type: {type(attempt_subject_id)}), expected {subject_id}")
     
-    # Limit weak/strong areas to avoid prompt being too long
-    weak_areas = weak_areas[:5]
-    strong_areas = strong_areas[:5]
+    logger.debug(f"Found {len(weak_areas)} weak areas, {len(previously_asked)} previously asked questions")
+    
+    # Limit to avoid prompt being too long
+    weak_areas = weak_areas[:10]
+    previously_asked = previously_asked[:20]
     
     # Construct AI prompt
     difficulty_note = f"Target difficulty level: {level} (1=easiest, 6=hardest)" if level else "Mixed difficulty levels"
@@ -731,7 +744,23 @@ def generate_knowledge_based_questions(
     }
 ]'''
     
+    # Build focus mode instruction
+    if focus_weak_areas:
+        focus_instruction = """**Focus Mode: WEAK AREAS**
+Generate questions that specifically target the student's weak areas listed below. 
+Create similar questions to the ones they got wrong, but with different wording or scenarios to reinforce learning."""
+        weak_areas_note = f"- Student's weak areas (PRIORITIZE THESE): {json.dumps(weak_areas) if weak_areas else 'None (new student)'}"
+        repetition_rule = "9. Focus on weak areas - you MAY ask similar questions to the ones the student got wrong, but rephrase them differently."
+    else:
+        focus_instruction = """**Focus Mode: FRESH QUESTIONS**
+Generate completely new questions that cover different aspects of the syllabus. 
+Avoid repeating any previously asked questions until all syllabus topics have been covered."""
+        weak_areas_note = ""  # Not needed in fresh mode
+        repetition_rule = "9. CRITICAL: Do NOT repeat any previously asked questions - generate fresh, unique questions that cover different aspects of the syllabus. Only revisit a topic after all other topics in the syllabus have been covered."
+    
     prompt_content = f"""You are an educational content generator. Generate {count} questions based on the following knowledge document for {subject_name}.
+
+{focus_instruction}
 
 **Knowledge Content:**
 {knowledge_content[:4000]}
@@ -739,18 +768,19 @@ def generate_knowledge_based_questions(
 **Context:**
 - Number of questions to generate: {count}
 - {difficulty_note}
-- Student's weak areas: {json.dumps(weak_areas) if weak_areas else 'None (new student)'}
-- Student's strong areas: {json.dumps(strong_areas) if strong_areas else 'None (new student)'}
+{weak_areas_note}
+- Previously asked questions: {json.dumps(previously_asked) if previously_asked else 'None'}
 
 **Requirements:**
 1. Generate exactly {count} questions based on the knowledge content
 2. Questions should test understanding, not just memorization
 3. Cover different aspects/topics from the knowledge document
-4. If student has weak areas, include similar but different questions
+4. If student has weak areas, include similar but different questions to reinforce learning
 5. Vary difficulty levels appropriately (1-6 scale)
 6. Include clear, unambiguous questions
 7. Provide concise, accurate answers
 8. answer_type can be: "text", "numeric", or "boolean"
+{repetition_rule}
 
 **Output Format (JSON only, no additional text):**
 {response_json_format}
@@ -762,7 +792,7 @@ Generate ONLY valid JSON without any markdown formatting, explanations, or wrapp
         "content": prompt_content
     }
     
-    logger.info(f"Generating {count} knowledge-based questions for subject {subject_id} ({subject_name})")
+    logger.info(f"Generating {count} knowledge-based questions for subject {subject_id} ({subject_name}), focus_weak_areas={focus_weak_areas}")
     
     # Start timing the API call
     api_start_time = time.time()
