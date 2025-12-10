@@ -109,10 +109,14 @@ def save_prompt(uid: str, request_text: str, response_text: str, is_live: int = 
 
 def save_game_score(uid: str, user_name: str, game_type: str, score: int, time_seconds: int = None, total_questions: int = None):
     """Save a game score for the leaderboard."""
+    logger.info(f"[save_game_score] START - uid: {uid}, game_type: {game_type}, score: {score}, time: {time_seconds}")
     try:
+        logger.info(f"[save_game_score] Getting connection from db_provider...")
         conn = db_provider._get_connection()
+        logger.info(f"[save_game_score] Connection obtained successfully")
         cursor = conn.cursor()
         
+        logger.info(f"[save_game_score] Executing INSERT query...")
         cursor.execute("""
             INSERT INTO game_scores (uid, user_name, game_type, score, time_seconds, total_questions)
             VALUES (%s, %s, %s, %s, %s, %s)
@@ -121,12 +125,13 @@ def save_game_score(uid: str, user_name: str, game_type: str, score: int, time_s
         
         result = cursor.fetchone()
         score_id = result[0] if result else None
+        logger.info(f"[save_game_score] INSERT complete, score_id: {score_id}")
         
         conn.commit()
         cursor.close()
         conn.close()
         
-        logger.info(f"Game score saved: {game_type} for user {uid} - score: {score}, time: {time_seconds}")
+        logger.info(f"[save_game_score] SUCCESS - Game score saved: {game_type} for user {uid} - score: {score}, time: {time_seconds}, id: {score_id}")
         return {"id": score_id}
     except Exception as e:
         logger.error(f"Error saving game score: {e}")

@@ -1142,13 +1142,18 @@ async def submit_game_score(score_data: dict):
     from app.models.schemas import GameScoreSubmit
     from app.repositories import db_service
     
+    logger.info(f"[/game-scores POST] Received score_data: {score_data}")
+    
     try:
         # Validate input
+        logger.info(f"[/game-scores POST] Validating input with GameScoreSubmit...")
         score = GameScoreSubmit(**score_data)
+        logger.info(f"[/game-scores POST] Validated: uid={score.uid}, game_type={score.game_type}, score={score.score}")
         
         if score.game_type not in ['multiplication_time', 'multiplication_range']:
             raise HTTPException(status_code=400, detail="Invalid game_type. Must be 'multiplication_time' or 'multiplication_range'")
         
+        logger.info(f"[/game-scores POST] Calling db_service.save_game_score...")
         result = db_service.save_game_score(
             uid=score.uid,
             user_name=score.user_name,
@@ -1157,21 +1162,23 @@ async def submit_game_score(score_data: dict):
             time_seconds=score.time_seconds,
             total_questions=score.total_questions
         )
+        logger.info(f"[/game-scores POST] db_service.save_game_score returned: {result}")
         
         if result:
-            logger.info(f"Game score saved: {score.game_type} for user {score.uid} - score: {score.score}, time: {score.time_seconds}")
+            logger.info(f"[/game-scores POST] SUCCESS - score_id: {result.get('id')}")
             return {
                 "success": True,
                 "message": "Score saved successfully",
                 "score_id": result.get("id")
             }
         else:
+            logger.error(f"[/game-scores POST] FAILED - result was None or falsy")
             raise HTTPException(status_code=500, detail="Failed to save score")
             
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error saving game score: {e}")
+        logger.error(f"[/game-scores POST] Exception: {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to save score: {str(e)}")
 
 
