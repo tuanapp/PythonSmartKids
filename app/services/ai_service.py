@@ -739,6 +739,24 @@ def generate_knowledge_based_questions(
         "topic": "Topic name",
         "question": "Question text?",
         "answer": "Correct answer",
+        "answer_type": "multiple_choice",
+        "options": ["Option A", "Option B", "Option C"],
+        "difficulty": 2
+    },
+    {
+        "number": 2,
+        "topic": "Topic name",
+        "question": "Question text?",
+        "answer": "Correct answer",
+        "answer_type": "multiple_choice",
+        "options": ["Option A", "Option B", "Option C"],
+        "difficulty": 2
+    },
+    {
+        "number": 3,
+        "topic": "Topic name",
+        "question": "Question text?",
+        "answer": "Correct answer",
         "answer_type": "text",
         "difficulty": 3
     }
@@ -773,13 +791,14 @@ Avoid repeating any previously asked questions until all syllabus topics have be
 
 **Requirements:**
 1. Generate exactly {count} questions based on the knowledge content
-2. Questions should test understanding, not just memorization
-3. Cover different aspects/topics from the knowledge document
-4. If student has weak areas, include similar but different questions to reinforce learning
-5. Vary difficulty levels appropriately (1-6 scale)
-6. Include clear, unambiguous questions
-7. Provide concise, accurate answers
-8. answer_type can be: "text", "numeric", or "boolean"
+2. IMPORTANT: The first 2 questions MUST be multiple choice with answer_type="multiple_choice" and include an "options" array with exactly 3 choices (one correct answer and 2 plausible wrong answers). The correct answer must be one of the options.
+3. The remaining questions (3 onwards) should be free-text questions with answer_type="text"
+4. Questions should test understanding, not just memorization
+5. Cover different aspects/topics from the knowledge document
+6. If student has weak areas, include similar but different questions to reinforce learning
+7. Vary difficulty levels appropriately (1-6 scale)
+8. Include clear, unambiguous questions
+9. Provide concise, accurate answers
 {repetition_rule}
 
 **Output Format (JSON only, no additional text):**
