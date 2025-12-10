@@ -102,5 +102,133 @@ def save_prompt(uid: str, request_text: str, response_text: str, is_live: int = 
         logger.error(f"Error saving prompt: {e}")
         raise
 
+
+# ============================================================================
+# Game Score / Leaderboard Functions
+# ============================================================================
+
+def save_game_score(uid: str, user_name: str, game_type: str, score: int, time_seconds: int = None, total_questions: int = None):
+    """Save a game score for the leaderboard."""
+    try:
+        conn = db_provider._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO game_scores (uid, user_name, game_type, score, time_seconds, total_questions)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (uid, user_name, game_type, score, time_seconds, total_questions))
+        
+        result = cursor.fetchone()
+        score_id = result[0] if result else None
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        logger.info(f"Game score saved: {game_type} for user {uid} - score: {score}, time: {time_seconds}")
+        return score_id
+    except Exception as e:
+        logger.error(f"Error saving game score: {e}")
+        raise
+
+
+def get_leaderboard(game_type: str, limit: int = 3):
+    """Get top scores for a specific game type."""
+    try:
+        conn = db_provider._get_connection()
+        cursor = conn.cursor()
+        
+        if game_type == 'multiplication_time':
+            # For time game: highest score (correct answers) is best
+            cursor.execute("""
+                SELECT id, uid, user_name, game_type, score, time_seconds, total_questions, created_at
+                FROM game_scores
+                WHERE game_type = %s
+                ORDER BY score DESC, created_at ASC
+                LIMIT %s
+            """, (game_type, limit))
+        else:
+            # For range game: lowest time is best
+            cursor.execute("""
+                SELECT id, uid, user_name, game_type, score, time_seconds, total_questions, created_at
+                FROM game_scores
+                WHERE game_type = %s AND time_seconds IS NOT NULL
+                ORDER BY time_seconds ASC, created_at ASC
+                LIMIT %s
+            """, (game_type, limit))
+        
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        result = []
+        for rank, row in enumerate(rows, 1):
+            result.append({
+                "id": row[0],
+                "uid": row[1],
+                "user_name": row[2],
+                "game_type": row[3],
+                "score": row[4],
+                "time_seconds": row[5],
+                "total_questions": row[6],
+                "created_at": row[7].isoformat() if row[7] else None,
+                "rank": rank
+            })
+        
+        return result
+    except Exception as e:
+        logger.error(f"Error fetching leaderboard: {e}")
+        raise
+
+
+def get_user_best_scores(uid: str, game_type: str, limit: int = 3):
+    """Get a user's best scores for a specific game type."""
+    try:
+        conn = db_provider._get_connection()
+        cursor = conn.cursor()
+        
+        if game_type == 'multiplication_time':
+            # For time game: highest score is best
+            cursor.execute("""
+                SELECT id, uid, user_name, game_type, score, time_seconds, total_questions, created_at
+                FROM game_scores
+                WHERE uid = %s AND game_type = %s
+                ORDER BY score DESC, created_at ASC
+                LIMIT %s
+            """, (uid, game_type, limit))
+        else:
+            # For range game: lowest time is best
+            cursor.execute("""
+                SELECT id, uid, user_name, game_type, score, time_seconds, total_questions, created_at
+                FROM game_scores
+                WHERE uid = %s AND game_type = %s AND time_seconds IS NOT NULL
+                ORDER BY time_seconds ASC, created_at ASC
+                LIMIT %s
+            """, (uid, game_type, limit))
+        
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        result = []
+        for row in rows:
+            result.append({
+                "id": row[0],
+                "uid": row[1],
+                "user_name": row[2],
+                "game_type": row[3],
+                "score": row[4],
+                "time_seconds": row[5],
+                "total_questions": row[6],
+                "created_at": row[7].isoformat() if row[7] else None
+            })
+        
+        return result
+    except Exception as e:
+        logger.error(f"Error fetching user best scores: {e}")
+        raise
+
+
 # Initialize the database when this module is imported
 init_db()

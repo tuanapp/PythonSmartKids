@@ -1140,7 +1140,7 @@ async def submit_game_score(score_data: dict):
     For multiplication_range: lower time_seconds is better
     """
     from app.models.schemas import GameScoreSubmit
-    from app.db.models import GameScore, get_session
+    from app.repositories import db_service
     
     try:
         # Validate input
@@ -1149,30 +1149,24 @@ async def submit_game_score(score_data: dict):
         if score.game_type not in ['multiplication_time', 'multiplication_range']:
             raise HTTPException(status_code=400, detail="Invalid game_type. Must be 'multiplication_time' or 'multiplication_range'")
         
-        db = get_session()
-        try:
-            # Create new score record
-            new_score = GameScore(
-                uid=score.uid,
-                user_name=score.user_name,
-                game_type=score.game_type,
-                score=score.score,
-                time_seconds=score.time_seconds,
-                total_questions=score.total_questions
-            )
-            db.add(new_score)
-            db.commit()
-            db.refresh(new_score)
-            
+        result = db_service.save_game_score(
+            uid=score.uid,
+            user_name=score.user_name,
+            game_type=score.game_type,
+            score=score.score,
+            time_seconds=score.time_seconds,
+            total_questions=score.total_questions
+        )
+        
+        if result:
             logger.info(f"Game score saved: {score.game_type} for user {score.uid} - score: {score.score}, time: {score.time_seconds}")
-            
             return {
                 "success": True,
                 "message": "Score saved successfully",
-                "score_id": new_score.id
+                "score_id": result.get("id")
             }
-        finally:
-            db.close()
+        else:
+            raise HTTPException(status_code=500, detail="Failed to save score")
             
     except HTTPException:
         raise
@@ -1193,49 +1187,14 @@ async def get_leaderboard(game_type: str, limit: int = 3):
         game_type: 'multiplication_time' or 'multiplication_range'
         limit: Number of top scores to return (default: 3)
     """
-    from app.db.models import GameScore, get_session
-    from sqlalchemy import desc, asc
+    from app.repositories import db_service
     
     if game_type not in ['multiplication_time', 'multiplication_range']:
         raise HTTPException(status_code=400, detail="Invalid game_type. Must be 'multiplication_time' or 'multiplication_range'")
     
     try:
-        db = get_session()
-        try:
-            if game_type == 'multiplication_time':
-                # For time game: highest score (correct answers) is best
-                query = db.query(GameScore).filter(
-                    GameScore.game_type == game_type
-                ).order_by(desc(GameScore.score), asc(GameScore.created_at)).limit(limit)
-            else:
-                # For range game: lowest time is best (only consider completed games)
-                query = db.query(GameScore).filter(
-                    GameScore.game_type == game_type,
-                    GameScore.time_seconds.isnot(None)
-                ).order_by(asc(GameScore.time_seconds), asc(GameScore.created_at)).limit(limit)
-            
-            scores = query.all()
-            
-            result = []
-            for rank, score in enumerate(scores, 1):
-                result.append({
-                    "id": score.id,
-                    "uid": score.uid,
-                    "user_name": score.user_name,
-                    "game_type": score.game_type,
-                    "score": score.score,
-                    "time_seconds": score.time_seconds,
-                    "total_questions": score.total_questions,
-                    "created_at": score.created_at.isoformat() if score.created_at else None,
-                    "rank": rank
-                })
-            
-            return {
-                "game_type": game_type,
-                "scores": result
-            }
-        finally:
-            db.close()
+        result = db_service.get_leaderboard(game_type=game_type, limit=limit)
+        return result
             
     except Exception as e:
         logger.error(f"Error fetching leaderboard: {e}")
@@ -1252,38 +1211,16 @@ async def get_user_scores(uid: str, game_type: str = None, limit: int = 10):
         game_type: Optional filter by game type
         limit: Number of scores to return (default: 10)
     """
-    from app.db.models import GameScore, get_session
-    from sqlalchemy import desc
+    from app.repositories import db_service
     
     try:
-        db = get_session()
-        try:
-            query = db.query(GameScore).filter(GameScore.uid == uid)
-            
-            if game_type:
-                if game_type not in ['multiplication_time', 'multiplication_range']:
-                    raise HTTPException(status_code=400, detail="Invalid game_type")
-                query = query.filter(GameScore.game_type == game_type)
-            
-            scores = query.order_by(desc(GameScore.created_at)).limit(limit).all()
-            
-            result = []
-            for score in scores:
-                result.append({
-                    "id": score.id,
-                    "game_type": score.game_type,
-                    "score": score.score,
-                    "time_seconds": score.time_seconds,
-                    "total_questions": score.total_questions,
-                    "created_at": score.created_at.isoformat() if score.created_at else None
-                })
-            
-            return {
-                "uid": uid,
-                "scores": result
-            }
-        finally:
-            db.close()
+        if game_type and game_type not in ['multiplication_time', 'multiplication_range']:
+            raise HTTPException(status_code=400, detail="Invalid game_type")
+        
+        # Use the best scores function with optional game_type filter
+        # For general user scores, we just return recent scores
+        result = db_service.get_user_best_scores(uid=uid, game_type=game_type, limit=limit)
+        return result
             
     except HTTPException:
         raise
@@ -1293,7 +1230,7 @@ async def get_user_scores(uid: str, game_type: str = None, limit: int = 10):
 
 
 @router.get("/game-scores/user/{uid}/best")
-async def get_user_best_scores(uid: str, game_type: str, limit: int = 3):
+async def get_user_best_scores_endpoint(uid: str, game_type: str, limit: int = 3):
     """
     Get a user's best scores for a specific game type.
     
@@ -1305,50 +1242,14 @@ async def get_user_best_scores(uid: str, game_type: str, limit: int = 3):
         game_type: 'multiplication_time' or 'multiplication_range'
         limit: Number of best scores to return (default: 3)
     """
-    from app.db.models import GameScore, get_session
-    from sqlalchemy import desc, asc
+    from app.repositories import db_service
     
     if game_type not in ['multiplication_time', 'multiplication_range']:
         raise HTTPException(status_code=400, detail="Invalid game_type. Must be 'multiplication_time' or 'multiplication_range'")
     
     try:
-        db = get_session()
-        try:
-            if game_type == 'multiplication_time':
-                # For time game: highest score (correct answers) is best
-                query = db.query(GameScore).filter(
-                    GameScore.uid == uid,
-                    GameScore.game_type == game_type
-                ).order_by(desc(GameScore.score), asc(GameScore.created_at)).limit(limit)
-            else:
-                # For range game: lowest time is best
-                query = db.query(GameScore).filter(
-                    GameScore.uid == uid,
-                    GameScore.game_type == game_type,
-                    GameScore.time_seconds.isnot(None)
-                ).order_by(asc(GameScore.time_seconds), asc(GameScore.created_at)).limit(limit)
-            
-            scores = query.all()
-            
-            result = []
-            for score in scores:
-                result.append({
-                    "id": score.id,
-                    "uid": score.uid,
-                    "user_name": score.user_name,
-                    "game_type": score.game_type,
-                    "score": score.score,
-                    "time_seconds": score.time_seconds,
-                    "total_questions": score.total_questions,
-                    "created_at": score.created_at.isoformat() if score.created_at else None
-                })
-            
-            return {
-                "uid": uid,
-                "scores": result
-            }
-        finally:
-            db.close()
+        result = db_service.get_user_best_scores(uid=uid, game_type=game_type, limit=limit)
+        return result
             
     except HTTPException:
         raise
