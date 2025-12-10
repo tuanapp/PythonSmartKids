@@ -127,7 +127,7 @@ def save_game_score(uid: str, user_name: str, game_type: str, score: int, time_s
         conn.close()
         
         logger.info(f"Game score saved: {game_type} for user {uid} - score: {score}, time: {time_seconds}")
-        return score_id
+        return {"id": score_id}
     except Exception as e:
         logger.error(f"Error saving game score: {e}")
         raise
@@ -162,9 +162,9 @@ def get_leaderboard(game_type: str, limit: int = 3):
         cursor.close()
         conn.close()
         
-        result = []
+        scores = []
         for rank, row in enumerate(rows, 1):
-            result.append({
+            scores.append({
                 "id": row[0],
                 "uid": row[1],
                 "user_name": row[2],
@@ -176,7 +176,10 @@ def get_leaderboard(game_type: str, limit: int = 3):
                 "rank": rank
             })
         
-        return result
+        return {
+            "game_type": game_type,
+            "scores": scores
+        }
     except Exception as e:
         logger.error(f"Error fetching leaderboard: {e}")
         raise
@@ -211,9 +214,9 @@ def get_user_best_scores(uid: str, game_type: str, limit: int = 3):
         cursor.close()
         conn.close()
         
-        result = []
+        scores = []
         for row in rows:
-            result.append({
+            scores.append({
                 "id": row[0],
                 "uid": row[1],
                 "user_name": row[2],
@@ -224,7 +227,10 @@ def get_user_best_scores(uid: str, game_type: str, limit: int = 3):
                 "created_at": row[7].isoformat() if row[7] else None
             })
         
-        return result
+        return {
+            "uid": uid,
+            "scores": scores
+        }
     except Exception as e:
         logger.error(f"Error fetching user best scores: {e}")
         raise
