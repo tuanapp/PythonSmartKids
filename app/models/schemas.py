@@ -108,3 +108,37 @@ class AnswerEvaluationResult(BaseModel):
     improvement_tips: Optional[str] = None
     score: Optional[float] = None  # 0.0 - 1.0
 
+
+# ============================================================================
+# Game Leaderboard Schemas
+# ============================================================================
+
+class GameScoreSubmit(BaseModel):
+    """Request body for submitting a game score"""
+    uid: str
+    user_name: str  # Display name for leaderboard
+    game_type: str  # 'multiplication_time' or 'multiplication_range'
+    score: int  # Correct answers (time game) or used as secondary metric
+    time_seconds: Optional[int] = None  # Completion time (range game)
+    total_questions: Optional[int] = None
+
+
+class GameScoreResponse(BaseModel):
+    """A single game score for leaderboard display"""
+    id: int
+    uid: str
+    user_name: str
+    game_type: str
+    score: int
+    time_seconds: Optional[int] = None
+    total_questions: Optional[int] = None
+    created_at: str  # ISO format datetime string
+    rank: Optional[int] = None  # Position in leaderboard
+
+
+class LeaderboardResponse(BaseModel):
+    """Response containing top scores for a game type"""
+    game_type: str
+    scores: List[GameScoreResponse]
+
+

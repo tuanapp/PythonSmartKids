@@ -113,6 +113,20 @@ class UserBlockingHistory(Base):
     unblocked_at = Column(DateTime(timezone=True), nullable=True)
     notes = Column(Text, nullable=True)
 
+
+class GameScore(Base):
+    """SQLAlchemy model for game scores (leaderboard)."""
+    __tablename__ = "game_scores"
+
+    id = Column(Integer, primary_key=True)
+    uid = Column(String, nullable=False, index=True)  # Firebase User UID
+    user_name = Column(String(255), nullable=False)  # Display name for leaderboard
+    game_type = Column(String(50), nullable=False, index=True)  # 'multiplication_time' or 'multiplication_range'
+    score = Column(Integer, nullable=False)  # Correct answers for time game
+    time_seconds = Column(Integer, nullable=True)  # Completion time for range game
+    total_questions = Column(Integer, nullable=True)  # Total questions answered
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
 def get_engine():
     """Get a SQLAlchemy engine instance."""
     return create_engine(DATABASE_URL)
