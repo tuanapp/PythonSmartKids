@@ -138,6 +138,45 @@ def save_game_score(uid: str, user_name: str, game_type: str, score: int, time_s
         raise
 
 
+def _mask_user_name(name: str) -> str:
+    """
+    Mask user name for PII protection.
+    Format: First name (last letter replaced with *) + first letter of last name.
+    Examples:
+        "John Smith" -> "Joh* S"
+        "Alice" -> "Alic*"
+        "john.doe@email.com" -> "joh* d" (treats email username as name)
+    """
+    if not name:
+        return "Player"
+    
+    # If it looks like an email, extract username part
+    if '@' in name:
+        name = name.split('@')[0]
+        # Replace dots/underscores with spaces for parsing
+        name = name.replace('.', ' ').replace('_', ' ')
+    
+    parts = name.strip().split()
+    
+    if len(parts) == 0:
+        return "Player"
+    
+    first_name = parts[0]
+    
+    # Mask last letter of first name
+    if len(first_name) > 1:
+        masked_first = first_name[:-1] + '*'
+    else:
+        masked_first = '*'
+    
+    # Add first letter of last name if exists
+    if len(parts) > 1:
+        last_initial = parts[-1][0].upper() if parts[-1] else ''
+        return f"{masked_first} {last_initial}"
+    
+    return masked_first
+
+
 def get_leaderboard(game_type: str, limit: int = 3):
     """Get top scores for a specific game type."""
     try:
@@ -172,7 +211,7 @@ def get_leaderboard(game_type: str, limit: int = 3):
             scores.append({
                 "id": row[0],
                 "uid": row[1],
-                "user_name": row[2],
+                "user_name": _mask_user_name(row[2]),  # Mask for PII protection
                 "game_type": row[3],
                 "score": row[4],
                 "time_seconds": row[5],
