@@ -120,6 +120,15 @@ class VercelMigrationManager:
             """)
             knowledge_documents_exists = cursor.fetchone()[0]
             
+            # Check if game_scores table exists (leaderboard feature)
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'game_scores'
+                )
+            """)
+            game_scores_exists = cursor.fetchone()[0]
+            
             cursor.close()
             conn.close()
             
@@ -136,8 +145,9 @@ class VercelMigrationManager:
                 'question_generations_exists': question_generations_exists,
                 'subjects_exists': subjects_exists,
                 'knowledge_documents_exists': knowledge_documents_exists,
+                'game_scores_exists': game_scores_exists,
                 'needs_migration': (
-                    current_version != '009' or  # Updated to latest version (knowledge-based questions)
+                    current_version != '010' or  # Updated to latest version (game scores/leaderboard)
                     not notes_column_exists or 
                     not level_column_exists or
                     not prompts_table_exists or
@@ -145,7 +155,8 @@ class VercelMigrationManager:
                     not user_blocking_exists or
                     not user_blocking_history_exists or
                     not subjects_exists or
-                    not knowledge_documents_exists
+                    not knowledge_documents_exists or
+                    not game_scores_exists
                 )
             }
             
@@ -184,12 +195,16 @@ class VercelMigrationManager:
             knowledge_result = self.add_knowledge_based_questions_migration()
             logger.info(f"Knowledge-based questions migration result: {knowledge_result['message']}")
             
+            # Ensure game_scores table exists (leaderboard feature)
+            game_scores_result = self.add_game_scores_migration()
+            logger.info(f"Game scores migration result: {game_scores_result['message']}")
+            
             # Verify the migration was successful
             status = self.check_migration_status()
             
             return {
                 'success': True,
-                'message': 'All migrations applied successfully (including knowledge-based questions)',
+                'message': 'All migrations applied successfully (including game scores/leaderboard)',
                 'final_status': status,
                 'migrations_applied': [
                     'Base tables (attempts, question_patterns, users)',
@@ -202,7 +217,8 @@ class VercelMigrationManager:
                     'LLM interactions table (question generation tracking)',
                     'Question generations table (daily limit tracking)',
                     'Subjects table (knowledge-based questions)',
-                    'Knowledge documents table'
+                    'Knowledge documents table',
+                    'Game scores table (leaderboard)'
                 ]
             }
             
@@ -841,6 +857,84 @@ class VercelMigrationManager:
             
         except Exception as e:
             logger.error(f"Error in migration 009: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def add_game_scores_migration(self) -> Dict[str, Any]:
+        """
+        Apply migration 010: Add game_scores table for leaderboard functionality.
+        
+        Stores scores for:
+        - multiplication_time: highest correct answers in 100s is the best score
+        - multiplication_range: lowest time to complete 88 questions is the best score
+        """
+        try:
+            conn = self.db_provider._get_connection()
+            cursor = conn.cursor()
+            messages = []
+            
+            # Check if game_scores table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'game_scores'
+                )
+            """)
+            game_scores_exists = cursor.fetchone()[0]
+            
+            if not game_scores_exists:
+                cursor.execute("""
+                    CREATE TABLE game_scores (
+                        id SERIAL PRIMARY KEY,
+                        uid VARCHAR(100) NOT NULL,
+                        user_name VARCHAR(255) NOT NULL,
+                        game_type VARCHAR(50) NOT NULL,
+                        score INTEGER NOT NULL,
+                        time_seconds INTEGER,
+                        total_questions INTEGER,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        CONSTRAINT valid_game_type CHECK (game_type IN ('multiplication_time', 'multiplication_range'))
+                    )
+                """)
+                messages.append("Created game_scores table")
+                logger.info("Created game_scores table")
+                
+                # Create indexes for efficient leaderboard queries
+                cursor.execute("CREATE INDEX idx_game_scores_uid ON game_scores(uid)")
+                cursor.execute("CREATE INDEX idx_game_scores_type ON game_scores(game_type)")
+                cursor.execute("CREATE INDEX idx_game_scores_type_score ON game_scores(game_type, score DESC)")
+                cursor.execute("CREATE INDEX idx_game_scores_type_time ON game_scores(game_type, time_seconds ASC)")
+                messages.append("Created indexes on game_scores table")
+                logger.info("Created indexes on game_scores table")
+            else:
+                messages.append("Game scores table already exists")
+            
+            # Update migration version to 010
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) PRIMARY KEY)
+            """)
+            cursor.execute("""
+                DELETE FROM alembic_version WHERE version_num IN ('010', '009', '008', '007', '2d3eefae954c')
+            """)
+            cursor.execute("""
+                INSERT INTO alembic_version (version_num) VALUES ('010')
+                ON CONFLICT (version_num) DO NOTHING
+            """)
+            messages.append("Updated alembic version to 010")
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            return {
+                'success': True,
+                'message': '; '.join(messages) if messages else 'Migration 010 already applied'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in migration 010: {e}")
             return {
                 'success': False,
                 'error': str(e)
