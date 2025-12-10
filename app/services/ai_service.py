@@ -866,14 +866,18 @@ Generate ONLY valid JSON without any markdown formatting, explanations, or wrapp
             # Validate structure and ensure all questions have required fields
             validated_questions = []
             for i, q in enumerate(questions):
-                validated_questions.append({
+                validated_q = {
                     'number': q.get('number', i + 1),
                     'topic': q.get('topic', 'General'),
                     'question': q.get('question', ''),
                     'answer': str(q.get('answer', '')),
                     'answer_type': q.get('answer_type', 'text'),
                     'difficulty': q.get('difficulty', 3)
-                })
+                }
+                # Include options for multiple choice questions
+                if q.get('options') and isinstance(q.get('options'), list):
+                    validated_q['options'] = q.get('options')
+                validated_questions.append(validated_q)
             
             # Extract token usage
             prompt_tokens = completion.usage.prompt_tokens if hasattr(completion.usage, 'prompt_tokens') else None
