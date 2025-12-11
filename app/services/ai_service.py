@@ -402,18 +402,22 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
                     'questions': questions,
                     'timestamp': datetime.now(),
                     'message': "Success" if not is_fallback_attempt else f"Success (fallback: {model})",
-                    'ai_response': current_response_text,
-                    'ai_request': prompt['content'],  # Include the prompt text
                     'response_time': response_time_ms / 1000.0,  # Convert to seconds for backward compatibility
                     'prompt_id': prompt_id,  # Add prompt ID
-                    'validation_result': {
+                    'ai_summary': {
+                        'ai_request': prompt['content'],
+                        'ai_response': current_response_text,
+                        'ai_model': model,
+                        'generation_time_ms': response_time_ms,
+                        'used_fallback': is_fallback_attempt,
+                        'fallback_count': attempt_index,
+                        'knowledge_document_ids': None,
+                        'past_incorrect_attempts_count': len(weak_areas),
                         'is_valid': validation_result['is_valid'],
                         'is_partial': validation_result.get('is_partial', False),
                         'questions_validated': len(questions),
                         'errors_count': len(validation_result['errors']),
                         'warnings_count': len(validation_result['warnings']),
-                        'ai_model': model,
-                        'used_fallback': is_fallback_attempt,
                         'historical_records': f"{len(attempts)} db attempts used out of {MAX_ATTEMPTS_HISTORY_LIMIT} max",
                         'level': level,
                         'is_new_user': is_new_user,
@@ -457,8 +461,20 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
                         level,
                         prompt['content']  # Pass the prompt text
                     )
-                    fallback_result['validation_result'] = {
+                    fallback_result['ai_summary'] = {
+                        'ai_request': prompt['content'],
+                        'ai_response': current_response_text,
+                        'ai_model': model,
+                        'generation_time_ms': response_time_ms,
+                        'used_fallback': True,
+                        'fallback_count': attempt_index + 1,
+                        'knowledge_document_ids': None,
+                        'past_incorrect_attempts_count': len(weak_areas),
                         'is_valid': False,
+                        'is_partial': False,
+                        'questions_validated': 0,
+                        'errors_count': len(validation_result['errors']),
+                        'warnings_count': len(validation_result['warnings']),
                         'original_errors': validation_result['errors'],
                         'original_warnings': validation_result['warnings'],
                         'historical_records': f"{len(attempts)} db attempts used out of {MAX_ATTEMPTS_HISTORY_LIMIT} max",
@@ -636,25 +652,32 @@ def generate_fallback_questions(error_message="Unknown error occurred", current_
         current_response_text = json.dumps(fallback_questions, indent=2)
     
     # Build the return response
+    is_new_user_fallback = len(attempts) == 0 if attempts is not None else True
     result = {
         'questions': fallback_questions,
         'timestamp': datetime.now(),
         'message': f"AI question generation failed: {error_message} {AI_BRIDGE_MODEL} {api_key_last3} {AI_BRIDGE_BASE_URL}",
-        'ai_response': current_response_text,
-        'ai_request': prompt_text if prompt_text else f"Fallback questions generated due to error: {error_message}",  # Include ai_request for prompt storage
-        'response_time': response_time
-    }
-    
-    # Add historical records info if attempts data is available
-    if attempts is not None:
-        is_new_user_fallback = len(attempts) == 0
-        result['validation_result'] = {
+        'response_time': response_time,
+        'ai_summary': {
+            'ai_request': prompt_text if prompt_text else f"Fallback questions generated due to error: {error_message}",
+            'ai_response': current_response_text,
+            'ai_model': 'fallback_hardcoded',
+            'generation_time_ms': int(response_time * 1000) if response_time else 0,
+            'used_fallback': True,
+            'fallback_count': 1,
+            'knowledge_document_ids': None,
+            'past_incorrect_attempts_count': 0,
             'is_valid': False,
-            'historical_records': f"{len(attempts)} db attempts used out of {MAX_ATTEMPTS_HISTORY_LIMIT} max",
+            'is_partial': False,
+            'questions_validated': len(fallback_questions),
+            'errors_count': 1,
+            'warnings_count': 0,
+            'historical_records': f"{len(attempts) if attempts else 0} db attempts used out of {MAX_ATTEMPTS_HISTORY_LIMIT} max",
             'level': level,
             'is_new_user': is_new_user_fallback,
             'user_type': 'new_user' if is_new_user_fallback else 'returning_user'
         }
+    }
     
     return result
 
@@ -674,7 +697,8 @@ def generate_knowledge_based_questions(
     level: Optional[int] = None,
     user_history: Optional[List[dict]] = None,
     is_live: int = 1,
-    focus_weak_areas: bool = False
+    focus_weak_areas: bool = False,
+    knowledge_document_ids: Optional[str] = None
 ) -> dict:
     """
     Generate questions based on knowledge document content.
@@ -689,6 +713,7 @@ def generate_knowledge_based_questions(
         user_history: User's previous attempts for personalization
         is_live: 1=live production call, 0=test/local call
         focus_weak_areas: If True, focus on previous wrong answers; if False, generate fresh questions only
+        knowledge_document_ids: Comma-separated string of knowledge document IDs used (e.g., "1,3,5")
     
     Returns:
         Dict with questions array and metadata, including prompt_id for tracking
@@ -903,12 +928,18 @@ Generate ONLY valid JSON without any markdown formatting, explanations, or wrapp
             
             return {
                 'questions': validated_questions,
-                'ai_model': model_name,
-                'generation_time_ms': response_time_ms,
                 'count': len(validated_questions),
                 'prompt_id': prompt_id,
-                'used_fallback': is_fallback_attempt,
-                'prompt_used': prompt_content
+                'ai_summary': {
+                    'ai_request': prompt_content,
+                    'ai_response': response_text,
+                    'ai_model': model_name,
+                    'generation_time_ms': response_time_ms,
+                    'used_fallback': is_fallback_attempt,
+                    'fallback_count': attempt_index,
+                    'knowledge_document_ids': knowledge_document_ids,
+                    'past_incorrect_attempts_count': len(weak_areas)
+                }
             }
             
         except json.JSONDecodeError as e:
@@ -1058,10 +1089,15 @@ Generate ONLY valid JSON without markdown formatting or extra text."""
             logger.info(f"Successfully evaluated {len(evaluations)} answers in {response_time_ms}ms using {model_name}")
             return {
                 'evaluations': evaluations,
-                'validation_result': {
+                'ai_summary': {
+                    'ai_request': prompt_content,
+                    'ai_response': response_text,
                     'ai_model': model_name,
                     'generation_time_ms': response_time_ms,
-                    'used_fallback': is_fallback_attempt
+                    'used_fallback': is_fallback_attempt,
+                    'fallback_count': attempt_index,
+                    'knowledge_document_ids': None,
+                    'past_incorrect_attempts_count': None
                 }
             }
             
@@ -1099,7 +1135,7 @@ def _fallback_evaluation(answers: List[dict], ai_error: str = None) -> dict:
         ai_error: Optional error message from the AI failure
         
     Returns:
-        Dict with evaluations list and validation_result
+        Dict with evaluations list and ai_summary
     """
     fallback_msg = f'Evaluated using simple comparison (AI unavailable: {ai_error})' if ai_error else 'Evaluated using simple comparison (AI unavailable)'
     
@@ -1119,10 +1155,15 @@ def _fallback_evaluation(answers: List[dict], ai_error: str = None) -> dict:
     
     return {
         'evaluations': evaluations,
-        'validation_result': {
+        'ai_summary': {
+            'ai_request': None,
+            'ai_response': None,
             'ai_model': 'fallback_simple_comparison',
             'generation_time_ms': 0,
             'used_fallback': True,
+            'fallback_count': 1,
+            'knowledge_document_ids': None,
+            'past_incorrect_attempts_count': None,
             'error': ai_error
         }
     }

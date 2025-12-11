@@ -527,8 +527,9 @@ async def generate_questions(request: GenerateQuestionsRequest):
         
         # Save the prompt and response to database (legacy prompts table) - SKIP, already done
         try:
-            prompt_request = questions_response.get('ai_request', '')
-            prompt_response = questions_response.get('ai_response', '')
+            ai_summary = questions_response.get('ai_summary', {})
+            prompt_request = ai_summary.get('ai_request', '') if ai_summary else ''
+            prompt_response = ai_summary.get('ai_response', '') if ai_summary else ''
             
             logger.debug(f"Prompt storage check - ai_request exists: {bool(prompt_request)}, ai_response exists: {bool(prompt_response)}")
             logger.debug(f"Response keys: {list(questions_response.keys())}")
@@ -918,6 +919,9 @@ async def generate_knowledge_questions(request: dict):
                 }
             )
         
+        # Build knowledge_document_ids as comma-separated string
+        knowledge_document_ids = ",".join(str(doc['id']) for doc in knowledge_docs) if knowledge_docs else None
+        
         # Combine knowledge content (use first document or combine multiple)
         knowledge_content = knowledge_docs[0]['content']
         if len(knowledge_docs) > 1:
@@ -938,7 +942,8 @@ async def generate_knowledge_questions(request: dict):
             level=level,
             user_history=user_history,
             is_live=is_live,
-            focus_weak_areas=focus_weak_areas
+            focus_weak_areas=focus_weak_areas,
+            knowledge_document_ids=knowledge_document_ids
         )
         
         # Decrement user credits after successful generation
@@ -970,12 +975,7 @@ async def generate_knowledge_questions(request: dict):
         return {
             "message": "Questions generated successfully",
             "questions": result['questions'],
-            "validation_result": {
-                "ai_model": result['ai_model'],
-                "generation_time_ms": result['generation_time_ms'],
-                "used_fallback": result.get('used_fallback', False)
-            },
-            "prompt_used": result.get('prompt_used'),
+            "ai_summary": result.get('ai_summary'),
             "daily_count": actual_count,
             "daily_limit": max_daily,
             "is_premium": is_premium,
@@ -1044,9 +1044,9 @@ async def evaluate_answers(request: dict):
             is_live=is_live
         )
         
-        # Extract evaluations and validation_result from AI response
+        # Extract evaluations and ai_summary from AI response
         results = ai_result.get('evaluations', [])
-        validation_result = ai_result.get('validation_result', {})
+        ai_summary = ai_result.get('ai_summary', {})
         
         # Save attempts to database
         for i, result in enumerate(results):
@@ -1088,7 +1088,7 @@ async def evaluate_answers(request: dict):
                 "average_score": round(total_score, 2)
             },
             "subject": subject,
-            "validation_result": validation_result
+            "ai_summary": ai_summary
         }
         
     except HTTPException:
