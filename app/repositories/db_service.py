@@ -113,6 +113,330 @@ def save_prompt(uid: str, request_text: str, response_text: str, is_live: int = 
 
 
 # ============================================================================
+# User Credits Management Functions
+# ============================================================================
+
+def get_user_credits(uid: str) -> int:
+    """Get the current credits for a user."""
+    try:
+        conn = db_provider._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT credits FROM users WHERE uid = %s", (uid,))
+        result = cursor.fetchone()
+        
+        cursor.close()
+        conn.close()
+        
+        if result:
+            return result[0]
+        return 0
+    except Exception as e:
+        logger.error(f"Error getting user credits: {e}")
+        return 0
+
+
+def decrement_user_credits(uid: str) -> int:
+    """
+    Decrement user credits by 1 after successful AI generation.
+    Returns the new credit balance.
+    """
+    try:
+        conn = db_provider._get_connection()
+        cursor = conn.cursor()
+        
+        # Decrement credits but don't go below 0
+        cursor.execute("""
+            UPDATE users 
+            SET credits = GREATEST(credits - 1, 0),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE uid = %s
+            RETURNING credits
+        """, (uid,))
+        
+        result = cursor.fetchone()
+        new_credits = result[0] if result else 0
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        logger.info(f"Decremented credits for user {uid}, new balance: {new_credits}")
+        return new_credits
+    except Exception as e:
+        logger.error(f"Error decrementing user credits: {e}")
+        raise
+
+
+def adjust_user_credits(uid: str, amount: int, reason: str = None) -> dict:
+    """
+    Adjust user credits by a given amount (positive to add, negative to subtract).
+    Used by admin endpoint to manage user credits.
+    
+    Args:
+        uid: Firebase User UID
+        amount: Credits to add (positive) or remove (negative)
+        reason: Optional reason for the adjustment
+        
+    Returns:
+        Dictionary with old_credits, new_credits, and adjustment details
+    """
+    try:
+        conn = db_provider._get_connection()
+        cursor = conn.cursor()
+        
+        # Get current credits first
+        cursor.execute("SELECT credits FROM users WHERE uid = %s", (uid,))
+        result = cursor.fetchone()
+        
+        if not result:
+            cursor.close()
+            conn.close()
+            raise ValueError(f"User not found: {uid}")
+        
+        old_credits = result[0]
+        
+        # Calculate new credits (don't go below 0)
+        new_credits = max(old_credits + amount, 0)
+        
+        # Update credits
+        cursor.execute("""
+            UPDATE users 
+            SET credits = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE uid = %s
+        """, (new_credits, uid))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        logger.info(f"Adjusted credits for user {uid}: {old_credits} -> {new_credits} (amount: {amount}, reason: {reason})")
+        
+        return {
+            "uid": uid,
+            "old_credits": old_credits,
+            "new_credits": new_credits,
+            "adjustment": amount,
+            "reason": reason
+        }
+    except Exception as e:
+        logger.error(f"Error adjusting user credits: {e}")
+        raise
+
+
+# ============================================================================
+# Credit Usage Tracking Functions
+# ============================================================================
+
+def record_credit_usage(uid: str, game_type: str, subject: str = None, sub_section: str = None, credits_used: int = 1) -> dict:
+    """
+    Record or update credit usage for a user on a specific game/subject for today.
+    Uses upsert logic: if record exists for today, increment; otherwise create new.
+    
+    Args:
+        uid: Firebase User UID
+        game_type: Type of game ('math', 'dictation', 'knowledge', etc.)
+        subject: Subject within game (e.g., 'addition', 'multiplication')
+        sub_section: Future: sub-section within subject
+        credits_used: Number of credits used (default 1)
+        
+    Returns:
+        Dictionary with usage record details
+    """
+    try:
+        conn = db_provider._get_connection()
+        cursor = conn.cursor()
+        
+        # Use upsert to either create or update the record
+        cursor.execute("""
+            INSERT INTO credit_usage (uid, usage_date, game_type, subject, sub_section, credits_used, generation_count)
+            VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, 1)
+            ON CONFLICT (uid, usage_date, game_type, subject) 
+            DO UPDATE SET 
+                credits_used = credit_usage.credits_used + EXCLUDED.credits_used,
+                generation_count = credit_usage.generation_count + 1,
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING id, usage_date, credits_used, generation_count
+        """, (uid, game_type, subject, sub_section, credits_used))
+        
+        result = cursor.fetchone()
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        if result:
+            logger.info(f"Recorded credit usage for user {uid}: game={game_type}, subject={subject}, credits={result[2]}, count={result[3]}")
+            return {
+                "id": result[0],
+                "usage_date": str(result[1]),
+                "credits_used": result[2],
+                "generation_count": result[3]
+            }
+        return None
+    except Exception as e:
+        # If unique constraint doesn't exist yet, fall back to simple insert/update
+        logger.warning(f"Upsert failed, falling back to simple insert: {e}")
+        try:
+            conn = db_provider._get_connection()
+            cursor = conn.cursor()
+            
+            # Check if record exists
+            cursor.execute("""
+                SELECT id, credits_used, generation_count FROM credit_usage 
+                WHERE uid = %s AND usage_date = CURRENT_DATE AND game_type = %s 
+                AND (subject = %s OR (subject IS NULL AND %s IS NULL))
+            """, (uid, game_type, subject, subject))
+            
+            existing = cursor.fetchone()
+            
+            if existing:
+                # Update existing record
+                cursor.execute("""
+                    UPDATE credit_usage 
+                    SET credits_used = credits_used + %s,
+                        generation_count = generation_count + 1,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    RETURNING id, credits_used, generation_count
+                """, (credits_used, existing[0]))
+            else:
+                # Insert new record
+                cursor.execute("""
+                    INSERT INTO credit_usage (uid, usage_date, game_type, subject, sub_section, credits_used, generation_count)
+                    VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, 1)
+                    RETURNING id, credits_used, generation_count
+                """, (uid, game_type, subject, sub_section, credits_used))
+            
+            result = cursor.fetchone()
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            if result:
+                logger.info(f"Recorded credit usage for user {uid}: game={game_type}, subject={subject}")
+                return {
+                    "id": result[0],
+                    "credits_used": result[1],
+                    "generation_count": result[2]
+                }
+            return None
+        except Exception as e2:
+            logger.error(f"Error recording credit usage: {e2}")
+            raise
+
+
+def get_user_credit_usage(uid: str, usage_date: str = None, game_type: str = None) -> list:
+    """
+    Get credit usage records for a user.
+    
+    Args:
+        uid: Firebase User UID
+        usage_date: Optional date filter (YYYY-MM-DD format, defaults to today)
+        game_type: Optional game type filter
+        
+    Returns:
+        List of credit usage records
+    """
+    try:
+        conn = db_provider._get_connection()
+        cursor = conn.cursor()
+        
+        query = """
+            SELECT id, uid, usage_date, game_type, subject, sub_section, credits_used, generation_count, created_at
+            FROM credit_usage 
+            WHERE uid = %s
+        """
+        params = [uid]
+        
+        if usage_date:
+            query += " AND usage_date = %s"
+            params.append(usage_date)
+        else:
+            query += " AND usage_date = CURRENT_DATE"
+        
+        if game_type:
+            query += " AND game_type = %s"
+            params.append(game_type)
+        
+        query += " ORDER BY game_type, subject"
+        
+        cursor.execute(query, params)
+        results = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        
+        return [
+            {
+                "id": row[0],
+                "uid": row[1],
+                "usage_date": str(row[2]),
+                "game_type": row[3],
+                "subject": row[4],
+                "sub_section": row[5],
+                "credits_used": row[6],
+                "generation_count": row[7],
+                "created_at": row[8].isoformat() if row[8] else None
+            }
+            for row in results
+        ]
+    except Exception as e:
+        logger.error(f"Error getting user credit usage: {e}")
+        raise
+
+
+def get_user_daily_credit_summary(uid: str, usage_date: str = None) -> dict:
+    """
+    Get a summary of credit usage for a user on a specific date.
+    
+    Args:
+        uid: Firebase User UID
+        usage_date: Optional date (YYYY-MM-DD format, defaults to today)
+        
+    Returns:
+        Summary dictionary with totals per game type
+    """
+    try:
+        conn = db_provider._get_connection()
+        cursor = conn.cursor()
+        
+        date_condition = "usage_date = %s" if usage_date else "usage_date = CURRENT_DATE"
+        params = [uid, usage_date] if usage_date else [uid]
+        
+        cursor.execute(f"""
+            SELECT 
+                game_type,
+                SUM(credits_used) as total_credits,
+                SUM(generation_count) as total_generations
+            FROM credit_usage 
+            WHERE uid = %s AND {date_condition}
+            GROUP BY game_type
+        """, params)
+        
+        results = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        
+        by_game = {row[0]: {"credits_used": row[1], "generation_count": row[2]} for row in results}
+        total_credits = sum(row[1] for row in results)
+        total_generations = sum(row[2] for row in results)
+        
+        return {
+            "uid": uid,
+            "usage_date": usage_date or "today",
+            "total_credits_used": total_credits,
+            "total_generations": total_generations,
+            "by_game_type": by_game
+        }
+    except Exception as e:
+        logger.error(f"Error getting user daily credit summary: {e}")
+        raise
+
+
+# ============================================================================
 # Game Score / Leaderboard Functions
 # ============================================================================
 

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from app.models.schemas import MathAttempt, GenerateQuestionsRequest, UserRegistration, UserProfileUpdate
+from app.models.schemas import MathAttempt, GenerateQuestionsRequest, UserRegistration, UserProfileUpdate, AdjustCreditsRequest
 from app.services import ai_service
 from app.services.ai_service import generate_practice_questions
 from app.services.prompt_service import PromptService
@@ -40,14 +40,15 @@ async def register_user(user: UserRegistration):
 
 @router.get("/users/{uid}")
 async def get_user(uid: str):
-    """Get user information including subscription level and daily usage"""
+    """Get user information including subscription level, credits, and daily usage"""
     try:
         user_data = db_service.get_user_by_uid(uid)
         if not user_data:
             raise HTTPException(status_code=404, detail="User not found")
         
-        # Get subscription level
+        # Get subscription level and credits
         subscription = user_data.get("subscription", 0)
+        credits = user_data.get("credits", 0)
         
         # Initialize prompt service to get daily usage
         prompt_service = PromptService()
@@ -65,6 +66,7 @@ async def get_user(uid: str):
             "displayName": user_data["display_name"],
             "gradeLevel": user_data["grade_level"],
             "subscription": subscription,
+            "credits": credits,
             "registrationDate": user_data["registration_date"],
             "daily_count": daily_count,
             "daily_limit": max_daily,
@@ -302,6 +304,111 @@ async def get_blocked_users(
         logger.error(f"Error fetching blocked users: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch blocked users: {str(e)}")
 
+
+@router.post("/admin/users/{user_uid}/credits")
+async def adjust_user_credits(
+    user_uid: str,
+    request: AdjustCreditsRequest,
+    admin_key: str = ""
+):
+    """
+    Adjust user credits by a given amount.
+    Positive amount adds credits, negative amount removes credits.
+    Requires admin authentication.
+    
+    Args:
+        user_uid: Firebase User UID
+        request.amount: Credits to add (positive) or remove (negative)
+        request.reason: Optional reason for the adjustment
+        admin_key: Admin authentication key
+    """
+    # Verify admin access
+    expected_key = os.getenv('ADMIN_KEY', 'dev-admin-key')
+    if admin_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+    
+    try:
+        # Check if user exists
+        user_data = db_service.get_user_by_uid(user_uid)
+        if not user_data:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Adjust credits
+        result = db_service.adjust_user_credits(
+            uid=user_uid,
+            amount=request.amount,
+            reason=request.reason
+        )
+        
+        logger.info(f"Admin adjusted credits for {user_uid}: {result['old_credits']} -> {result['new_credits']} (reason: {request.reason})")
+        
+        return {
+            "success": True,
+            "uid": result["uid"],
+            "old_credits": result["old_credits"],
+            "new_credits": result["new_credits"],
+            "adjustment": result["adjustment"],
+            "reason": result["reason"],
+            "message": f"Credits adjusted from {result['old_credits']} to {result['new_credits']}"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adjusting credits for {user_uid}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to adjust credits: {str(e)}")
+
+
+@router.get("/users/{user_uid}/credit-usage")
+async def get_user_credit_usage(
+    user_uid: str,
+    date: str = None,
+    game_type: str = None
+):
+    """
+    Get credit usage for a user.
+    
+    Args:
+        user_uid: Firebase User UID
+        date: Optional date filter (YYYY-MM-DD format, defaults to today)
+        game_type: Optional game type filter ('math', 'knowledge', 'dictation', etc.)
+    
+    Returns:
+        Credit usage summary and detailed records
+    """
+    try:
+        # Check if user exists
+        user_data = db_service.get_user_by_uid(user_uid)
+        if not user_data:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Get detailed usage records
+        usage_records = db_service.get_user_credit_usage(
+            uid=user_uid,
+            usage_date=date,
+            game_type=game_type
+        )
+        
+        # Get summary
+        summary = db_service.get_user_daily_credit_summary(
+            uid=user_uid,
+            usage_date=date
+        )
+        
+        return {
+            "success": True,
+            "uid": user_uid,
+            "user_name": user_data.get("display_name"),
+            "credits_remaining": user_data.get("credits", 0),
+            "summary": summary,
+            "records": usage_records
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting credit usage for {user_uid}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get credit usage: {str(e)}")
+
+
 @router.post("/submit_attempt")
 async def submit_attempt(attempt: MathAttempt):
     db_service.save_attempt(attempt)
@@ -317,7 +424,9 @@ async def analyze_student(uid: str):
 async def generate_questions(request: GenerateQuestionsRequest):
     """
     Generate a new set of practice questions based on the student's previous performance.
-    Enforces subscription-based daily limits: free/trial users = 2/day, premium = unlimited.
+    Enforces credit-based and subscription-based limits:
+    - Credits: Overall cap on total AI generations
+    - Daily limits: Free/trial users = 2/day, premium = unlimited
     Tracks all question generations in the prompts table.
     Optionally filter patterns by difficulty level.
     """
@@ -327,31 +436,36 @@ async def generate_questions(request: GenerateQuestionsRequest):
     prompt_service = PromptService()
     
     try:
-        # Get user data to check subscription level
+        # Get user data to check subscription level and credits
         user_data = db_service.get_user_by_uid(request.uid)
         
-        # Default to free subscription (0) if user not found (should not happen with auth middleware)
+        # Default values if user not found (should not happen with auth middleware)
         subscription = user_data.get("subscription", 0) if user_data else 0
+        credits = user_data.get("credits", 0) if user_data else 0
         
-        logger.info(f"User {request.uid} subscription level: {subscription}")
+        logger.info(f"User {request.uid} subscription level: {subscription}, credits: {credits}")
         
-        # Check if user can generate questions based on subscription and daily limit
+        # Check if user can generate questions based on credits, subscription and daily limit
         limit_check = prompt_service.can_generate_questions(
             uid=request.uid,
             subscription=subscription,
+            credits=credits,
             max_daily_questions=2  # Free and trial users limited to 2/day
         )
         
         if not limit_check['can_generate']:
-            logger.warning(f"User {request.uid} exceeded daily limit: {limit_check['reason']}")
+            # Determine error type based on reason
+            error_type = 'no_credits' if 'credit' in limit_check['reason'].lower() else 'daily_limit_exceeded'
+            logger.warning(f"User {request.uid} cannot generate: {limit_check['reason']}")
             raise HTTPException(
                 status_code=403,  # Forbidden
                 detail={
-                    'error': 'daily_limit_exceeded',
+                    'error': error_type,
                     'message': limit_check['reason'],
                     'current_count': limit_check['current_count'],
                     'max_count': limit_check['max_count'],
-                    'is_premium': limit_check['is_premium']
+                    'is_premium': limit_check['is_premium'],
+                    'credits_remaining': limit_check['credits_remaining']
                 }
             )
         
@@ -386,6 +500,22 @@ async def generate_questions(request: GenerateQuestionsRequest):
         # No need for separate question_generations table
         prompt_id = questions_response.get('prompt_id')
         
+        # Decrement user credits after successful generation
+        new_credits = db_service.decrement_user_credits(request.uid)
+        logger.info(f"Decremented credits for user {request.uid}, new balance: {new_credits}")
+        
+        # Record credit usage for analytics
+        try:
+            subject = f"level_{request.level}" if request.level else "general"
+            db_service.record_credit_usage(
+                uid=request.uid,
+                game_type="math",
+                subject=subject,
+                credits_used=1
+            )
+        except Exception as usage_error:
+            logger.warning(f"Failed to record credit usage (non-critical): {usage_error}")
+        
         # Query actual current count AFTER generation is saved (more accurate than pre-query + 1)
         actual_count = prompt_service.get_daily_question_generation_count(request.uid)
         
@@ -393,6 +523,7 @@ async def generate_questions(request: GenerateQuestionsRequest):
         questions_response['daily_count'] = actual_count
         questions_response['daily_limit'] = limit_check['max_count']
         questions_response['is_premium'] = limit_check['is_premium']
+        questions_response['credits_remaining'] = new_credits
         
         # Save the prompt and response to database (legacy prompts table) - SKIP, already done
         try:
@@ -723,22 +854,39 @@ async def generate_knowledge_questions(request: dict):
         
         # Initialize prompt service for daily limit checking
         prompt_service = PromptService()
-        daily_count = prompt_service.get_daily_question_generation_count(uid)
         subscription = user_data.get("subscription", 0)
-        is_premium = subscription >= 2
-        max_daily = None if is_premium else 2
+        credits = user_data.get("credits", 0)
         
-        # Check daily limit for non-premium users
-        if not is_premium and daily_count >= max_daily:
+        logger.info(f"User {uid} subscription level: {subscription}, credits: {credits}")
+        
+        # Check if user can generate questions based on credits, subscription and daily limit
+        limit_check = prompt_service.can_generate_questions(
+            uid=uid,
+            subscription=subscription,
+            credits=credits,
+            max_daily_questions=2  # Free and trial users limited to 2/day
+        )
+        
+        if not limit_check['can_generate']:
+            # Determine error type based on reason
+            error_type = 'no_credits' if 'credit' in limit_check['reason'].lower() else 'daily_limit_exceeded'
+            logger.warning(f"User {uid} cannot generate knowledge questions: {limit_check['reason']}")
             raise HTTPException(
-                status_code=429,
+                status_code=403,
                 detail={
-                    "message": "Daily limit reached",
-                    "current_count": daily_count,
-                    "max_count": max_daily,
-                    "is_premium": is_premium
+                    'error': error_type,
+                    'message': limit_check['reason'],
+                    'current_count': limit_check['current_count'],
+                    'max_count': limit_check['max_count'],
+                    'is_premium': limit_check['is_premium'],
+                    'credits_remaining': limit_check['credits_remaining']
                 }
             )
+        
+        logger.info(f"Limit check passed: {limit_check['reason']}")
+        is_premium = limit_check['is_premium']
+        max_daily = limit_check['max_count']
+        daily_count = limit_check['current_count']
         
         # Get subject info
         subject = KnowledgeService.get_subject_by_id(subject_id)
@@ -793,6 +941,10 @@ async def generate_knowledge_questions(request: dict):
             focus_weak_areas=focus_weak_areas
         )
         
+        # Decrement user credits after successful generation
+        new_credits = db_service.decrement_user_credits(uid)
+        logger.info(f"Decremented credits for user {uid}, new balance: {new_credits}")
+        
         # Log usage
         KnowledgeService.log_knowledge_usage(
             uid,
@@ -801,7 +953,19 @@ async def generate_knowledge_questions(request: dict):
             count
         )
         
-        # Update daily count (increment in prompts table was already done in AI service)
+        # Record credit usage for analytics
+        try:
+            db_service.record_credit_usage(
+                uid=uid,
+                game_type="knowledge",
+                subject=subject['display_name'] if subject else None,
+                credits_used=1
+            )
+        except Exception as usage_error:
+            logger.warning(f"Failed to record credit usage (non-critical): {usage_error}")
+        
+        # Query actual current count AFTER generation is saved
+        actual_count = prompt_service.get_daily_question_generation_count(uid)
         
         return {
             "message": "Questions generated successfully",
@@ -812,9 +976,10 @@ async def generate_knowledge_questions(request: dict):
                 "used_fallback": result.get('used_fallback', False)
             },
             "prompt_used": result.get('prompt_used'),
-            "daily_count": daily_count + 1,
+            "daily_count": actual_count,
             "daily_limit": max_daily,
             "is_premium": is_premium,
+            "credits_remaining": new_credits,
             "subject": subject
         }
         

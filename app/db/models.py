@@ -82,6 +82,7 @@ class User(Base):
     display_name = Column(String, nullable=False)
     grade_level = Column(Integer, nullable=False)
     subscription = Column(Integer, default=0, nullable=False)  # 0=free, 1=trial, 2+=premium
+    credits = Column(Integer, default=10, nullable=False, index=True)  # AI generation credits (10 for new users)
     registration_date = Column(DateTime(timezone=True), nullable=False)
     
     # Blocking fields
@@ -126,6 +127,22 @@ class GameScore(Base):
     time_seconds = Column(Integer, nullable=True)  # Completion time for range game
     total_questions = Column(Integer, nullable=True)  # Total questions answered
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CreditUsage(Base):
+    """SQLAlchemy model for tracking daily credit usage per user, game, and subject."""
+    __tablename__ = "credit_usage"
+
+    id = Column(Integer, primary_key=True)
+    uid = Column(String, nullable=False, index=True)  # Firebase User UID
+    usage_date = Column(Date, nullable=False, index=True)  # Date of usage (for daily tracking)
+    game_type = Column(String(50), nullable=False, index=True)  # 'math', 'dictation', 'knowledge', etc.
+    subject = Column(String(100), nullable=True, index=True)  # Subject within game (e.g., 'addition', 'spelling')
+    sub_section = Column(String(100), nullable=True)  # Future: sub-section within subject
+    credits_used = Column(Integer, nullable=False, default=1)  # Number of credits used
+    generation_count = Column(Integer, nullable=False, default=1)  # Number of AI generations
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 def get_engine():
     """Get a SQLAlchemy engine instance."""

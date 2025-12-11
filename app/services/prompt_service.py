@@ -355,14 +355,21 @@ class PromptService:
         self,
         uid: str,
         subscription: int,
+        credits: int,
         max_daily_questions: int = 2
     ) -> Dict[str, Any]:
         """
-        Check if a user can generate more questions based on subscription and daily limit.
+        Check if a user can generate more questions based on credits, subscription and daily limit.
+        
+        Credits and daily limits work together:
+        - Credits: Overall cap on total AI generations (across all time)
+        - Daily limit: Cap on generations per day (resets daily)
+        - Both must allow generation for request to proceed
         
         Args:
             uid: Firebase User UID
             subscription: User's subscription level (0=free, 1=trial, 2+=premium)
+            credits: User's remaining AI generation credits
             max_daily_questions: Maximum allowed generations per day for free/trial users
             
         Returns:
@@ -372,20 +379,33 @@ class PromptService:
                 - current_count: int - Current daily count
                 - max_count: int or None - Max allowed (None for premium)
                 - is_premium: bool - Whether user has premium
+                - credits_remaining: int - Credits remaining after this check
         """
-        # Premium users (subscription >= 2) have unlimited access
         is_premium = subscription >= 2
         
+        # First check credits (applies to all users)
+        if credits <= 0:
+            return {
+                'can_generate': False,
+                'reason': 'No credits remaining',
+                'current_count': 0,
+                'max_count': None,
+                'is_premium': is_premium,
+                'credits_remaining': 0
+            }
+        
+        # Premium users bypass daily limits but still use credits
         if is_premium:
             return {
                 'can_generate': True,
-                'reason': 'Premium user - unlimited access',
+                'reason': 'Premium user - unlimited daily access',
                 'current_count': 0,  # Don't count for premium
                 'max_count': None,
-                'is_premium': True
+                'is_premium': True,
+                'credits_remaining': credits
             }
         
-        # For free/trial users, check daily limit
+        # For free/trial users, also check daily limit
         current_count = self.get_daily_question_generation_count(uid)
         
         if current_count >= max_daily_questions:
@@ -394,7 +414,8 @@ class PromptService:
                 'reason': f'Daily limit reached ({current_count}/{max_daily_questions})',
                 'current_count': current_count,
                 'max_count': max_daily_questions,
-                'is_premium': False
+                'is_premium': False,
+                'credits_remaining': credits
             }
         
         return {
@@ -402,6 +423,7 @@ class PromptService:
             'reason': f'Within daily limit ({current_count}/{max_daily_questions})',
             'current_count': current_count,
             'max_count': max_daily_questions,
-            'is_premium': False
+            'is_premium': False,
+            'credits_remaining': credits
         }
 
