@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from app.models.schemas import MathAttempt, GenerateQuestionsRequest, UserRegistration
+from app.models.schemas import MathAttempt, GenerateQuestionsRequest, UserRegistration, UserProfileUpdate
 from app.services import ai_service
 from app.services.ai_service import generate_practice_questions
 from app.services.prompt_service import PromptService
@@ -78,6 +78,51 @@ async def get_user(uid: str):
     except Exception as e:
         logger.error(f"Error retrieving user: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve user: {str(e)}")
+
+@router.patch("/users/{uid}/profile")
+async def update_user_profile(uid: str, update: UserProfileUpdate):
+    """Update user profile (name, displayName, gradeLevel)"""
+    try:
+        # Verify user exists
+        user_data = db_service.get_user_by_uid(uid)
+        if not user_data:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Check if any field is provided
+        if update.name is None and update.displayName is None and update.gradeLevel is None:
+            raise HTTPException(status_code=400, detail="No fields to update")
+        
+        # Update profile
+        db_service.update_user_profile(
+            uid,
+            name=update.name,
+            display_name=update.displayName,
+            grade_level=update.gradeLevel
+        )
+        
+        updated_fields = []
+        if update.name is not None:
+            updated_fields.append(f"name={update.name}")
+        if update.displayName is not None:
+            updated_fields.append(f"displayName={update.displayName}")
+        if update.gradeLevel is not None:
+            updated_fields.append(f"gradeLevel={update.gradeLevel}")
+        
+        logger.info(f"Updated profile for user {uid}: {', '.join(updated_fields)}")
+        
+        return {
+            "success": True,
+            "uid": uid,
+            "name": update.name,
+            "displayName": update.displayName,
+            "gradeLevel": update.gradeLevel,
+            "message": "Profile updated successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating user profile: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update profile: {str(e)}")
 
 @router.post("/users/{user_uid}/block")
 async def block_user(

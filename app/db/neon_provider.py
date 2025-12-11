@@ -465,6 +465,44 @@ class NeonProvider(DatabaseProvider):
             logger.error(f"Error retrieving user by email: {e}")
             raise Exception(f"Database error: {e}")
 
+    def update_user_profile(self, uid: str, name: str = None, display_name: str = None, grade_level: int = None) -> None:
+        """Update user profile fields (name, display_name, grade_level)."""
+        try:
+            # Build dynamic update query based on provided fields
+            updates = []
+            params = []
+            
+            if name is not None:
+                updates.append("name = %s")
+                params.append(name)
+            if display_name is not None:
+                updates.append("display_name = %s")
+                params.append(display_name)
+            if grade_level is not None:
+                updates.append("grade_level = %s")
+                params.append(grade_level)
+            
+            if not updates:
+                return  # Nothing to update
+            
+            params.append(uid)  # Add uid for WHERE clause
+            
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            query = f"UPDATE users SET {', '.join(updates)} WHERE uid = %s"
+            cursor.execute(query, tuple(params))
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            logger.debug(f"Updated profile for user {uid}")
+                
+        except Exception as e:
+            logger.error(f"Error updating user profile: {e}")
+            raise Exception(f"Database error: {e}")
+
     def save_prompt(self, uid: str, request_text: str, response_text: str, is_live: int = 1) -> None:
         """Save AI prompt request and response to the Neon database."""
         try:
