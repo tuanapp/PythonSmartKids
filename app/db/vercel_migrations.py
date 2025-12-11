@@ -129,6 +129,26 @@ class VercelMigrationManager:
             """)
             game_scores_exists = cursor.fetchone()[0]
             
+            # Check if credits column exists on users table
+            credits_column_exists = False
+            if 'users' in existing_tables:
+                cursor.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.columns 
+                        WHERE table_name = 'users' AND column_name = 'credits'
+                    )
+                """)
+                credits_column_exists = cursor.fetchone()[0]
+            
+            # Check if credit_usage table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'credit_usage'
+                )
+            """)
+            credit_usage_exists = cursor.fetchone()[0]
+            
             cursor.close()
             conn.close()
             
@@ -146,8 +166,10 @@ class VercelMigrationManager:
                 'subjects_exists': subjects_exists,
                 'knowledge_documents_exists': knowledge_documents_exists,
                 'game_scores_exists': game_scores_exists,
+                'credits_column_exists': credits_column_exists,
+                'credit_usage_exists': credit_usage_exists,
                 'needs_migration': (
-                    current_version != '010' or  # Updated to latest version (game scores/leaderboard)
+                    current_version != '011' or  # Updated to latest version (credit usage tracking)
                     not notes_column_exists or 
                     not level_column_exists or
                     not prompts_table_exists or
@@ -156,7 +178,9 @@ class VercelMigrationManager:
                     not user_blocking_history_exists or
                     not subjects_exists or
                     not knowledge_documents_exists or
-                    not game_scores_exists
+                    not game_scores_exists or
+                    not credits_column_exists or
+                    not credit_usage_exists
                 )
             }
             
@@ -199,12 +223,20 @@ class VercelMigrationManager:
             game_scores_result = self.add_game_scores_migration()
             logger.info(f"Game scores migration result: {game_scores_result['message']}")
             
+            # Ensure credits column exists on users table
+            credits_result = self.add_credits_column_migration()
+            logger.info(f"Credits column migration result: {credits_result['message']}")
+            
+            # Ensure credit_usage table exists (credit tracking analytics)
+            credit_usage_result = self.add_credit_usage_table_migration()
+            logger.info(f"Credit usage table migration result: {credit_usage_result['message']}")
+            
             # Verify the migration was successful
             status = self.check_migration_status()
             
             return {
                 'success': True,
-                'message': 'All migrations applied successfully (including game scores/leaderboard)',
+                'message': 'All migrations applied successfully (including credit usage tracking)',
                 'final_status': status,
                 'migrations_applied': [
                     'Base tables (attempts, question_patterns, users)',
@@ -218,7 +250,9 @@ class VercelMigrationManager:
                     'Question generations table (daily limit tracking)',
                     'Subjects table (knowledge-based questions)',
                     'Knowledge documents table',
-                    'Game scores table (leaderboard)'
+                    'Game scores table (leaderboard)',
+                    'Credits column on users',
+                    'Credit usage table (analytics)'
                 ]
             }
             
@@ -935,6 +969,154 @@ class VercelMigrationManager:
             
         except Exception as e:
             logger.error(f"Error in migration 010: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def add_credits_column_migration(self) -> Dict[str, Any]:
+        """
+        Apply migration 010b: Add credits column to users table.
+        
+        New users get 10 credits by default. Credits are used for AI generation
+        and work alongside daily limits.
+        """
+        try:
+            conn = self.db_provider._get_connection()
+            cursor = conn.cursor()
+            messages = []
+            
+            # Check if credits column exists on users table
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.columns 
+                    WHERE table_name = 'users' AND column_name = 'credits'
+                )
+            """)
+            credits_exists = cursor.fetchone()[0]
+            
+            if not credits_exists:
+                # Add credits column with default 10
+                cursor.execute("""
+                    ALTER TABLE users 
+                    ADD COLUMN credits INTEGER DEFAULT 10 NOT NULL
+                """)
+                messages.append("Added credits column to users table")
+                logger.info("Added credits column to users table")
+                
+                # Create index for credits queries
+                cursor.execute("CREATE INDEX idx_users_credits ON users(credits)")
+                messages.append("Created index on users.credits")
+                logger.info("Created index on users.credits")
+            else:
+                messages.append("Credits column already exists on users table")
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            return {
+                'success': True,
+                'message': '; '.join(messages) if messages else 'Credits column already exists'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error adding credits column: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def add_credit_usage_table_migration(self) -> Dict[str, Any]:
+        """
+        Apply migration 011: Add credit_usage table for tracking daily credit usage.
+        
+        Tracks usage per user, per day, per game type, per subject.
+        Allows for analytics and reporting on credit consumption.
+        """
+        try:
+            conn = self.db_provider._get_connection()
+            cursor = conn.cursor()
+            messages = []
+            
+            # Check if credit_usage table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'credit_usage'
+                )
+            """)
+            credit_usage_exists = cursor.fetchone()[0]
+            
+            if not credit_usage_exists:
+                # Create credit_usage table
+                cursor.execute("""
+                    CREATE TABLE credit_usage (
+                        id SERIAL PRIMARY KEY,
+                        uid VARCHAR(255) NOT NULL,
+                        usage_date DATE NOT NULL DEFAULT CURRENT_DATE,
+                        game_type VARCHAR(50) NOT NULL,
+                        subject VARCHAR(100),
+                        sub_section VARCHAR(100),
+                        credits_used INTEGER NOT NULL DEFAULT 1,
+                        generation_count INTEGER NOT NULL DEFAULT 1,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                """)
+                messages.append("Created credit_usage table")
+                logger.info("Created credit_usage table")
+                
+                # Create indexes
+                cursor.execute("CREATE INDEX idx_credit_usage_uid ON credit_usage(uid)")
+                cursor.execute("CREATE INDEX idx_credit_usage_date ON credit_usage(usage_date)")
+                cursor.execute("CREATE INDEX idx_credit_usage_game_type ON credit_usage(game_type)")
+                cursor.execute("CREATE INDEX idx_credit_usage_subject ON credit_usage(subject)")
+                messages.append("Created basic indexes on credit_usage table")
+                logger.info("Created basic indexes on credit_usage table")
+                
+                # Create composite index for efficient daily lookups
+                cursor.execute("""
+                    CREATE INDEX ix_credit_usage_uid_date_game 
+                    ON credit_usage(uid, usage_date, game_type)
+                """)
+                messages.append("Created composite index for daily lookups")
+                logger.info("Created composite index for daily lookups")
+                
+                # Create unique constraint for upsert operations
+                cursor.execute("""
+                    CREATE UNIQUE INDEX uq_credit_usage_uid_date_game_subject 
+                    ON credit_usage(uid, usage_date, game_type, COALESCE(subject, ''))
+                """)
+                messages.append("Created unique constraint for upsert")
+                logger.info("Created unique constraint for upsert")
+            else:
+                messages.append("Credit usage table already exists")
+            
+            # Update migration version to 011
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) PRIMARY KEY)
+            """)
+            cursor.execute("""
+                DELETE FROM alembic_version WHERE version_num IN ('011', '010', '009', '008', '007', '2d3eefae954c')
+            """)
+            cursor.execute("""
+                INSERT INTO alembic_version (version_num) VALUES ('011')
+                ON CONFLICT (version_num) DO NOTHING
+            """)
+            messages.append("Updated alembic version to 011")
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            return {
+                'success': True,
+                'message': '; '.join(messages) if messages else 'Migration 011 already applied'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in migration 011: {e}")
             return {
                 'success': False,
                 'error': str(e)
