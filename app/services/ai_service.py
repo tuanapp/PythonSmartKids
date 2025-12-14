@@ -938,7 +938,8 @@ Generate ONLY valid JSON without any markdown formatting, explanations, or wrapp
                     'used_fallback': is_fallback_attempt,
                     'fallback_count': attempt_index,
                     'knowledge_document_ids': knowledge_document_ids,
-                    'past_incorrect_attempts_count': len(weak_areas)
+                    'past_incorrect_attempts_count': len(weak_areas),
+                    'is_llm_only': not knowledge_document_ids or knowledge_document_ids.strip() == ''
                 }
             }
             
@@ -966,6 +967,287 @@ Generate ONLY valid JSON without any markdown formatting, explanations, or wrapp
             continue
     
     # If we get here, all models failed
+    raise ValueError(f"All models failed. Last error from {last_error_model}: {last_error}")
+
+
+def generate_llm_only_questions(
+    uid: str,
+    subject_id: int,
+    subject_name: str,
+    grade_level: Optional[int] = None,
+    count: int = 10,
+    level: Optional[int] = None,
+    user_history: Optional[List[dict]] = None,
+    is_live: int = 1,
+    focus_weak_areas: bool = False
+) -> dict:
+    """
+    Generate questions using LLM only (no knowledge documents).
+    Falls back to standard academic curriculum and syllabus when no knowledge documents exist.
+    
+    Args:
+        uid: User ID
+        subject_id: Subject ID
+        subject_name: Name of the subject
+        grade_level: Student's grade level (1-12)
+        count: Number of questions to generate
+        level: Difficulty level (1-6)
+        user_history: User's previous attempts for personalization
+        is_live: 1=live production call, 0=test/local call
+        focus_weak_areas: If True, focus on previous wrong answers
+    
+    Returns:
+        Dict with questions array and metadata
+    """
+    from app.services.prompt_service import PromptService
+    prompt_service = PromptService()
+    prompt_id = None
+    
+    # Build context from user history
+    weak_areas = []
+    previously_asked = []
+    
+    if user_history:
+        logger.debug(f"Processing {len(user_history)} attempts for LLM-only generation")
+        for attempt in user_history:
+            attempt_subject_id = attempt.get('subject_id')
+            if str(attempt_subject_id) == str(subject_id):
+                eval_status = attempt.get('evaluation_status', '').lower() if attempt.get('evaluation_status') else ''
+                
+                if attempt.get('question'):
+                    previously_asked.append(attempt['question'])
+                
+                if focus_weak_areas and eval_status in ['incorrect', 'partial']:
+                    weak_areas.append({
+                        'question': attempt['question'],
+                        'user_answer': attempt.get('user_answer', ''),
+                        'correct_answer': attempt['correct_answer']
+                    })
+    
+    weak_areas = weak_areas[:10]
+    previously_asked = previously_asked[:20]
+    
+    # Construct grade-appropriate prompt
+    grade_context = ""
+    if grade_level:
+        grade_context = f"""**Grade Level: {grade_level}**
+Generate questions appropriate for a Grade {grade_level} student following standard educational curricula (e.g., CBSE, ICSE, Common Core, UK National Curriculum).
+Ensure the vocabulary, complexity, and concepts are age-appropriate for this grade level."""
+    else:
+        grade_context = """**Grade Level: Not specified**
+Generate questions suitable for a general middle-school audience (Grades 5-8), with moderate complexity."""
+    
+    difficulty_note = f"Target difficulty level: {level} (1=easiest, 6=hardest)" if level else "Mixed difficulty levels"
+    
+    response_json_format = '''[
+    {
+        "number": 1,
+        "topic": "Topic name",
+        "question": "Question text?",
+        "answer": "Correct answer",
+        "answer_type": "multiple_choice",
+        "options": ["Option A", "Option B", "Option C"],
+        "difficulty": 2
+    },
+    {
+        "number": 2,
+        "topic": "Topic name",
+        "question": "Question text?",
+        "answer": "Correct answer",
+        "answer_type": "multiple_choice",
+        "options": ["Option A", "Option B", "Option C"],
+        "difficulty": 2
+    },
+    {
+        "number": 3,
+        "topic": "Topic name",
+        "question": "Question text?",
+        "answer": "Correct answer",
+        "answer_type": "text",
+        "difficulty": 3
+    }
+]'''
+    
+    # Build focus mode instruction
+    if focus_weak_areas and weak_areas:
+        focus_instruction = f"""**Focus Mode: WEAK AREAS**
+The student has struggled with certain topics. Generate questions that specifically target these weak areas:
+{json.dumps(weak_areas, indent=2)}
+
+Create similar questions to reinforce learning, but with different wording or scenarios."""
+        repetition_rule = "9. Focus on weak areas - create questions similar to the ones the student got wrong, but rephrased differently."
+    else:
+        focus_instruction = """**Focus Mode: FRESH QUESTIONS**
+Generate completely new questions covering the standard curriculum topics for this subject.
+Ensure variety and comprehensive coverage of key concepts."""
+        repetition_rule = "9. CRITICAL: Do NOT repeat any previously asked questions - generate fresh, unique questions covering different curriculum topics."
+    
+    previously_asked_note = f"- Previously asked questions to AVOID: {json.dumps(previously_asked)}" if previously_asked else ""
+    
+    prompt_content = f"""You are an expert educational content generator. Generate {count} questions for the subject "{subject_name}".
+
+**IMPORTANT: No knowledge documents are available. Generate questions based on standard academic curricula and educational standards.**
+
+{grade_context}
+
+{focus_instruction}
+
+**Reference Standards (use as guidance for topics and scope):**
+- Common Core State Standards (USA)
+- CBSE/ICSE Curriculum (India)
+- UK National Curriculum
+- IB (International Baccalaureate) standards
+- Standard textbooks and educational materials for this subject and grade level
+
+**Context:**
+- Subject: {subject_name}
+- Number of questions to generate: {count}
+- {difficulty_note}
+{previously_asked_note}
+
+**Requirements:**
+1. Generate exactly {count} questions based on standard curriculum for {subject_name}
+2. IMPORTANT: The first 2 questions MUST be multiple choice with answer_type="multiple_choice" and include an "options" array with exactly 3 choices (one correct answer and 2 plausible wrong answers). The correct answer must be one of the options.
+3. The remaining questions (3 onwards) should be free-text questions with answer_type="text"
+4. Questions should test understanding, not just memorization
+5. Cover different curriculum topics comprehensively
+6. Ensure factual accuracy - only include well-established facts
+7. Vary difficulty levels appropriately (1-6 scale)
+8. Include clear, unambiguous questions with concise, accurate answers
+{repetition_rule}
+
+**Output Format (JSON only, no additional text):**
+{response_json_format}
+
+Generate ONLY valid JSON without any markdown formatting, explanations, or wrapping text."""
+
+    prompt = {
+        "role": "user",
+        "content": prompt_content
+    }
+    
+    logger.info(f"Generating {count} LLM-only questions for subject {subject_id} ({subject_name}), grade={grade_level}, focus_weak_areas={focus_weak_areas}")
+    
+    # Start timing the API call
+    api_start_time = time.time()
+    response_time_ms = None
+    
+    # Determine which models to try
+    primary_model = AI_BRIDGE_MODEL
+    fallback_model = AI_FALLBACK_MODEL_1
+    
+    models_to_try = [primary_model]
+    if fallback_model and fallback_model != primary_model:
+        models_to_try.append(fallback_model)
+    
+    last_error = None
+    last_error_model = None
+    response_text = None
+    
+    for attempt_index, model_name in enumerate(models_to_try):
+        is_fallback_attempt = attempt_index > 0
+        
+        if is_fallback_attempt:
+            logger.info(f"Primary model failed, trying fallback model: {model_name}")
+            api_start_time = time.time()
+        
+        try:
+            completion = client.chat.completions.create(
+                model=model_name,
+                messages=[prompt],
+                temperature=0.7
+            )
+            
+            response_text = completion.choices[0].message.content
+            response_time_ms = int((time.time() - api_start_time) * 1000)
+            
+            # Clean response text
+            cleaned_response = response_text.strip()
+            if cleaned_response.startswith('```'):
+                lines = cleaned_response.split('\n')
+                if lines[0].startswith('```'):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == '```':
+                    lines = lines[:-1]
+                cleaned_response = '\n'.join(lines)
+            
+            # Parse and validate response
+            questions = json.loads(cleaned_response)
+            
+            # Validate structure
+            validated_questions = []
+            for i, q in enumerate(questions):
+                validated_q = {
+                    'number': q.get('number', i + 1),
+                    'topic': q.get('topic', 'General'),
+                    'question': q.get('question', ''),
+                    'answer': str(q.get('answer', '')),
+                    'answer_type': q.get('answer_type', 'text'),
+                    'difficulty': q.get('difficulty', 3)
+                }
+                if q.get('options') and isinstance(q.get('options'), list):
+                    validated_q['options'] = q.get('options')
+                validated_questions.append(validated_q)
+            
+            # Extract token usage
+            prompt_tokens = completion.usage.prompt_tokens if hasattr(completion.usage, 'prompt_tokens') else None
+            completion_tokens = completion.usage.completion_tokens if hasattr(completion.usage, 'completion_tokens') else None
+            total_tokens = completion.usage.total_tokens if hasattr(completion.usage, 'total_tokens') else None
+            
+            # Log prompt usage
+            try:
+                prompt_id = prompt_service.log_llm_interaction(
+                    uid=uid,
+                    request_text=prompt_content,
+                    response_text=response_text,
+                    model_name=model_name,
+                    is_live=is_live,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    response_time_ms=response_time_ms,
+                    status='success'
+                )
+            except Exception as log_error:
+                logger.warning(f"Failed to log prompt: {log_error}")
+            
+            return {
+                'questions': validated_questions,
+                'count': len(validated_questions),
+                'prompt_id': prompt_id,
+                'ai_summary': {
+                    'ai_request': prompt_content,
+                    'ai_response': response_text,
+                    'ai_model': model_name,
+                    'generation_time_ms': response_time_ms,
+                    'used_fallback': is_fallback_attempt,
+                    'fallback_count': attempt_index,
+                    'knowledge_document_ids': None,
+                    'past_incorrect_attempts_count': len(weak_areas),
+                    'is_llm_only': True,
+                    'grade_level': grade_level
+                }
+            }
+            
+        except json.JSONDecodeError as e:
+            last_error = f"AI returned invalid JSON: {e}"
+            last_error_model = model_name
+            logger.error(f"Error parsing AI response as JSON from {model_name}: {e}")
+            logger.error(f"Response was: {response_text if response_text else 'N/A'}")
+            
+            if attempt_index == len(models_to_try) - 1:
+                raise ValueError(last_error)
+            continue
+            
+        except Exception as e:
+            last_error = str(e)
+            last_error_model = model_name
+            logger.error(f"Error generating LLM-only questions with {model_name}: {e}")
+            
+            if attempt_index == len(models_to_try) - 1:
+                raise
+            continue
+    
     raise ValueError(f"All models failed. Last error from {last_error_model}: {last_error}")
 
 

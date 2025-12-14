@@ -903,21 +903,57 @@ async def generate_knowledge_questions(request: dict):
         )
         
         if not knowledge_docs:
-            # Get all docs for debugging
-            all_docs = KnowledgeService.get_knowledge_documents(subject_id, None, None)
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "message": f"No knowledge documents found for subject '{subject['display_name']}'",
-                    "debug": {
-                        "subject_id": subject_id,
-                        "user_grade": user_grade,
-                        "level_filter": level,
-                        "all_docs_count": len(all_docs),
-                        "all_docs": [{"id": d["id"], "title": d["title"], "grade_level": d.get("grade_level")} for d in all_docs[:5]]
-                    }
-                }
+            # No knowledge documents found - use LLM-only generation
+            logger.info(f"No knowledge documents found for subject {subject_id}, using LLM-only generation")
+            
+            # Get user's attempt history for personalization
+            user_history = KnowledgeService.get_user_knowledge_attempts(uid, subject_id, limit=20)
+            
+            # Import the LLM-only generator
+            from app.services.ai_service import generate_llm_only_questions
+            
+            result = generate_llm_only_questions(
+                uid=uid,
+                subject_id=subject_id,
+                subject_name=subject['display_name'],
+                grade_level=user_grade,
+                count=count,
+                level=level,
+                user_history=user_history,
+                is_live=is_live,
+                focus_weak_areas=focus_weak_areas
             )
+            
+            # Decrement user credits after successful generation
+            new_credits = db_service.decrement_user_credits(uid)
+            logger.info(f"Decremented credits for user {uid}, new balance: {new_credits}")
+            
+            # Log usage (no document ID since LLM-only)
+            KnowledgeService.log_knowledge_usage(uid, None, subject_id, count)
+            
+            # Record credit usage
+            try:
+                db_service.record_credit_usage(
+                    uid=uid,
+                    game_type="knowledge",
+                    subject=subject['display_name'],
+                    credits_used=1
+                )
+            except Exception as usage_error:
+                logger.warning(f"Failed to record credit usage: {usage_error}")
+            
+            actual_count = prompt_service.get_daily_question_generation_count(uid)
+            
+            return {
+                "message": "Questions generated successfully (LLM-only mode)",
+                "questions": result['questions'],
+                "ai_summary": result.get('ai_summary'),
+                "daily_count": actual_count,
+                "daily_limit": max_daily,
+                "is_premium": is_premium,
+                "credits_remaining": new_credits,
+                "subject": subject
+            }
         
         # Build knowledge_document_ids as comma-separated string
         knowledge_document_ids = ",".join(str(doc['id']) for doc in knowledge_docs) if knowledge_docs else None
