@@ -867,6 +867,38 @@ class VercelMigrationManager:
             else:
                 messages.append("Knowledge question attempts table already exists")
             
+            # Check if knowledge_usage_log table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'knowledge_usage_log'
+                )
+            """)
+            knowledge_usage_log_exists = cursor.fetchone()[0]
+            
+            if not knowledge_usage_log_exists:
+                # Create the knowledge_usage_log table
+                cursor.execute("""
+                    CREATE TABLE knowledge_usage_log (
+                        id SERIAL PRIMARY KEY,
+                        uid VARCHAR(100) NOT NULL,
+                        knowledge_doc_id INTEGER REFERENCES knowledge_documents(id),
+                        subject_id INTEGER REFERENCES subjects(id),
+                        question_count INTEGER,
+                        generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                messages.append("Created knowledge_usage_log table")
+                logger.info("Created knowledge_usage_log table")
+                
+                # Create indexes for performance
+                cursor.execute("CREATE INDEX idx_usage_log_uid ON knowledge_usage_log(uid)")
+                cursor.execute("CREATE INDEX idx_usage_log_subject ON knowledge_usage_log(subject_id)")
+                messages.append("Created indexes on knowledge_usage_log table")
+                logger.info("Created indexes on knowledge_usage_log table")
+            else:
+                messages.append("Knowledge usage log table already exists")
+            
             # Update migration version to 009
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) PRIMARY KEY)
