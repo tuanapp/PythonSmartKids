@@ -22,6 +22,10 @@ class Attempt(Base):
     incorrect_answer = Column(Text)
     correct_answer = Column(Text, nullable=False)
     qorder = Column(Integer, nullable=True)  # Order of questions in a session
+    model_id = Column(Integer, ForeignKey('llm_models.id', ondelete='SET NULL'), nullable=True, index=True)  # FK to llm_models
+    
+    # Relationships
+    model = relationship("LLMModel", back_populates="attempts")
 
 class QuestionPattern(Base):
     """SQLAlchemy model for question patterns."""
@@ -141,8 +145,61 @@ class CreditUsage(Base):
     sub_section = Column(String(100), nullable=True)  # Future: sub-section within subject
     credits_used = Column(Integer, nullable=False, default=1)  # Number of credits used
     generation_count = Column(Integer, nullable=False, default=1)  # Number of AI generations
+    model_id = Column(Integer, ForeignKey('llm_models.id', ondelete='SET NULL'), nullable=True, index=True)  # FK to llm_models
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Relationships
+    model = relationship("LLMModel", back_populates="credit_usages")
+
+
+class LLMModel(Base):
+    """SQLAlchemy model for tracking available AI models across providers."""
+    __tablename__ = "llm_models"
+
+    id = Column(Integer, primary_key=True)
+    model_name = Column(String(150), unique=True, nullable=False)  # Provider-native name, e.g., 'models/gemini-2.0-flash'
+    display_name = Column(String(150), nullable=True)  # Human-readable name
+    provider = Column(String(50), nullable=False, index=True)  # 'google', 'groq', 'anthropic', etc.
+    model_type = Column(String(50), nullable=True)  # 'flash', 'flash-lite', 'pro', etc.
+    version = Column(String(20), nullable=True)  # '2.0', '2.5', etc.
+    order_number = Column(Integer, default=0, nullable=False, index=True)  # Display order
+    active = Column(Boolean, default=True, nullable=False)  # Only active models returned in API
+    deprecated = Column(Boolean, default=False, nullable=False)  # Old models marked deprecated
+    manual = Column(Boolean, default=False, nullable=False)  # manual=True: never auto-updated
+    last_seen_at = Column(DateTime(timezone=True), nullable=True)  # Last time seen in provider API
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Relationships
+    credit_usages = relationship("CreditUsage", back_populates="model")
+    attempts = relationship("Attempt", back_populates="model")
+    knowledge_attempts = relationship("KnowledgeQuestionAttempt", back_populates="model")
+
+
+class KnowledgeQuestionAttempt(Base):
+    """SQLAlchemy model for knowledge question attempts."""
+    __tablename__ = "knowledge_question_attempts"
+
+    id = Column(Integer, primary_key=True)
+    uid = Column(String(128), nullable=False, index=True)
+    subject_id = Column(Integer, ForeignKey('subjects.id', ondelete='CASCADE'), nullable=False, index=True)
+    question = Column(Text, nullable=False)
+    user_answer = Column(Text, nullable=False)
+    correct_answer = Column(Text, nullable=False)
+    evaluation_status = Column(String(20), nullable=False, index=True)  # 'correct', 'incorrect', 'partial'
+    ai_feedback = Column(Text, nullable=True)
+    best_answer = Column(Text, nullable=True)
+    improvement_tips = Column(Text, nullable=True)
+    score = Column(Float, nullable=True)
+    difficulty_level = Column(Integer, nullable=True)
+    topic = Column(String(200), nullable=True)
+    model_id = Column(Integer, ForeignKey('llm_models.id', ondelete='SET NULL'), nullable=True, index=True)  # FK to llm_models
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    # Relationships
+    model = relationship("LLMModel", back_populates="knowledge_attempts")
+
 
 def get_engine():
     """Get a SQLAlchemy engine instance."""

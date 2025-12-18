@@ -149,6 +149,26 @@ class VercelMigrationManager:
             """)
             credit_usage_exists = cursor.fetchone()[0]
             
+            # Check if llm_models table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'llm_models'
+                )
+            """)
+            llm_models_exists = cursor.fetchone()[0]
+            
+            # Check if model_id column exists in credit_usage
+            credit_usage_model_id_exists = False
+            if credit_usage_exists:
+                cursor.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.columns 
+                        WHERE table_name = 'credit_usage' AND column_name = 'model_id'
+                    )
+                """)
+                credit_usage_model_id_exists = cursor.fetchone()[0]
+            
             cursor.close()
             conn.close()
             
@@ -168,8 +188,10 @@ class VercelMigrationManager:
                 'game_scores_exists': game_scores_exists,
                 'credits_column_exists': credits_column_exists,
                 'credit_usage_exists': credit_usage_exists,
+                'llm_models_exists': llm_models_exists,
+                'credit_usage_model_id_exists': credit_usage_model_id_exists,
                 'needs_migration': (
-                    current_version != '011' or  # Updated to latest version (credit usage tracking)
+                    current_version != '013' or  # Updated to latest version (LLM models + model references)
                     not notes_column_exists or 
                     not level_column_exists or
                     not prompts_table_exists or
@@ -180,7 +202,9 @@ class VercelMigrationManager:
                     not knowledge_documents_exists or
                     not game_scores_exists or
                     not credits_column_exists or
-                    not credit_usage_exists
+                    not credit_usage_exists or
+                    not llm_models_exists or
+                    not credit_usage_model_id_exists
                 )
             }
             
@@ -231,12 +255,20 @@ class VercelMigrationManager:
             credit_usage_result = self.add_credit_usage_table_migration()
             logger.info(f"Credit usage table migration result: {credit_usage_result['message']}")
             
+            # Ensure llm_models table exists (LLM model tracking)
+            llm_models_result = self.add_llm_models_migration()
+            logger.info(f"LLM models table migration result: {llm_models_result['message']}")
+            
+            # Ensure model_id references exist on tracking tables
+            model_refs_result = self.add_model_references_migration()
+            logger.info(f"Model references migration result: {model_refs_result['message']}")
+            
             # Verify the migration was successful
             status = self.check_migration_status()
             
             return {
                 'success': True,
-                'message': 'All migrations applied successfully (including credit usage tracking)',
+                'message': 'All migrations applied successfully (including LLM models tracking)',
                 'final_status': status,
                 'migrations_applied': [
                     'Base tables (attempts, question_patterns, users)',
@@ -252,7 +284,9 @@ class VercelMigrationManager:
                     'Knowledge documents table',
                     'Game scores table (leaderboard)',
                     'Credits column on users',
-                    'Credit usage table (analytics)'
+                    'Credit usage table (analytics)',
+                    'LLM models table',
+                    'Model ID references on tracking tables'
                 ]
             }
             
@@ -1153,6 +1187,191 @@ class VercelMigrationManager:
                 'success': False,
                 'error': str(e)
             }
+
+    def add_llm_models_migration(self) -> Dict[str, Any]:
+        """
+        Apply migration 012: Add llm_models table for tracking available AI models.
+        
+        Stores LLM models from various providers (Google, Groq, Anthropic, etc.).
+        Supports manual overrides, deprecation tracking, and ordering.
+        """
+        try:
+            conn = self.db_provider._get_connection()
+            cursor = conn.cursor()
+            messages = []
+            
+            # Check if llm_models table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'llm_models'
+                )
+            """)
+            llm_models_exists = cursor.fetchone()[0]
+            
+            if not llm_models_exists:
+                # Create llm_models table
+                cursor.execute("""
+                    CREATE TABLE llm_models (
+                        id SERIAL PRIMARY KEY,
+                        model_name VARCHAR(150) NOT NULL UNIQUE,
+                        display_name VARCHAR(150),
+                        provider VARCHAR(50) NOT NULL,
+                        model_type VARCHAR(50),
+                        version VARCHAR(20),
+                        order_number INTEGER DEFAULT 0 NOT NULL,
+                        active BOOLEAN DEFAULT TRUE NOT NULL,
+                        deprecated BOOLEAN DEFAULT FALSE NOT NULL,
+                        manual BOOLEAN DEFAULT FALSE NOT NULL,
+                        last_seen_at TIMESTAMPTZ,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                """)
+                messages.append("Created llm_models table")
+                logger.info("Created llm_models table")
+                
+                # Create indexes
+                cursor.execute("CREATE INDEX idx_llm_models_active ON llm_models(active) WHERE active = TRUE")
+                cursor.execute("CREATE INDEX idx_llm_models_provider ON llm_models(provider)")
+                cursor.execute("CREATE INDEX idx_llm_models_order ON llm_models(order_number)")
+                cursor.execute("CREATE INDEX idx_llm_models_deprecated ON llm_models(deprecated) WHERE deprecated = TRUE")
+                messages.append("Created indexes on llm_models table")
+                logger.info("Created indexes on llm_models table")
+            else:
+                messages.append("LLM models table already exists")
+            
+            # Update migration version to 012
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) PRIMARY KEY)
+            """)
+            cursor.execute("""
+                DELETE FROM alembic_version WHERE version_num IN ('012', '011', '010', '009', '008', '007', '2d3eefae954c')
+            """)
+            cursor.execute("""
+                INSERT INTO alembic_version (version_num) VALUES ('012')
+                ON CONFLICT (version_num) DO NOTHING
+            """)
+            messages.append("Updated alembic version to 012")
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            return {
+                'success': True,
+                'message': '; '.join(messages) if messages else 'Migration 012 already applied'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in migration 012: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def add_model_references_migration(self) -> Dict[str, Any]:
+        """
+        Apply migration 013: Add model_id foreign key references to tracking tables.
+        
+        Adds nullable model_id column to:
+        - credit_usage (primary tracking table for AI usage)
+        - attempts (math question attempts)
+        - knowledge_question_attempts (knowledge game attempts)
+        
+        Existing rows will have NULL for model_id. Only new records will have the FK populated.
+        """
+        try:
+            conn = self.db_provider._get_connection()
+            cursor = conn.cursor()
+            messages = []
+            
+            # Add model_id to credit_usage table
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.columns 
+                    WHERE table_name = 'credit_usage' AND column_name = 'model_id'
+                )
+            """)
+            credit_usage_model_id_exists = cursor.fetchone()[0]
+            
+            if not credit_usage_model_id_exists:
+                cursor.execute("""
+                    ALTER TABLE credit_usage 
+                    ADD COLUMN model_id INTEGER REFERENCES llm_models(id) ON DELETE SET NULL
+                """)
+                cursor.execute("CREATE INDEX idx_credit_usage_model_id ON credit_usage(model_id)")
+                messages.append("Added model_id column to credit_usage table")
+                logger.info("Added model_id column to credit_usage table")
+            else:
+                messages.append("credit_usage.model_id already exists")
+            
+            # Add model_id to attempts table
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.columns 
+                    WHERE table_name = 'attempts' AND column_name = 'model_id'
+                )
+            """)
+            attempts_model_id_exists = cursor.fetchone()[0]
+            
+            if not attempts_model_id_exists:
+                cursor.execute("""
+                    ALTER TABLE attempts 
+                    ADD COLUMN model_id INTEGER REFERENCES llm_models(id) ON DELETE SET NULL
+                """)
+                cursor.execute("CREATE INDEX idx_attempts_model_id ON attempts(model_id)")
+                messages.append("Added model_id column to attempts table")
+                logger.info("Added model_id column to attempts table")
+            else:
+                messages.append("attempts.model_id already exists")
+            
+            # Add model_id to knowledge_question_attempts table
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.columns 
+                    WHERE table_name = 'knowledge_question_attempts' AND column_name = 'model_id'
+                )
+            """)
+            knowledge_attempts_model_id_exists = cursor.fetchone()[0]
+            
+            if not knowledge_attempts_model_id_exists:
+                cursor.execute("""
+                    ALTER TABLE knowledge_question_attempts 
+                    ADD COLUMN model_id INTEGER REFERENCES llm_models(id) ON DELETE SET NULL
+                """)
+                cursor.execute("CREATE INDEX idx_knowledge_attempts_model_id ON knowledge_question_attempts(model_id)")
+                messages.append("Added model_id column to knowledge_question_attempts table")
+                logger.info("Added model_id column to knowledge_question_attempts table")
+            else:
+                messages.append("knowledge_question_attempts.model_id already exists")
+            
+            # Update migration version to 013
+            cursor.execute("""
+                DELETE FROM alembic_version WHERE version_num IN ('013', '012', '011', '010', '009', '008', '007', '2d3eefae954c')
+            """)
+            cursor.execute("""
+                INSERT INTO alembic_version (version_num) VALUES ('013')
+                ON CONFLICT (version_num) DO NOTHING
+            """)
+            messages.append("Updated alembic version to 013")
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            return {
+                'success': True,
+                'message': '; '.join(messages) if messages else 'Migration 013 already applied'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in migration 013: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
 
 # Global instance
 migration_manager = VercelMigrationManager()

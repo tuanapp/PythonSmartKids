@@ -160,3 +160,48 @@ class AdjustCreditsRequest(BaseModel):
     reason: Optional[str] = Field(None, max_length=255, description="Reason for adjustment")
 
 
+# ============================================================================
+# LLM Models Schemas
+# ============================================================================
+
+class LLMModelSchema(BaseModel):
+    """Response schema for an LLM model"""
+    id: int
+    model_name: str
+    display_name: Optional[str] = None
+    provider: str
+    model_type: Optional[str] = None
+    version: Optional[str] = None
+    order_number: int
+    active: bool
+    deprecated: bool
+    manual: bool
+    last_seen_at: Optional[str] = None  # ISO format datetime
+    created_at: str  # ISO format datetime
+    updated_at: str  # ISO format datetime
+
+
+class LLMModelUpdate(BaseModel):
+    """Request body for updating an LLM model (admin endpoint)"""
+    order_number: Optional[int] = Field(None, ge=0, description="Display order")
+    active: Optional[bool] = Field(None, description="Whether the model is active")
+    manual: Optional[bool] = Field(None, description="Whether the model is manually managed")
+    display_name: Optional[str] = Field(None, max_length=150, description="Human-readable name")
+
+
+class LLMModelSyncRequest(BaseModel):
+    """Request body for syncing LLM models from a provider"""
+    provider: str = Field(..., description="Provider to sync from: 'google', 'groq', 'anthropic'")
+    api_key: Optional[str] = Field(None, description="API key for the provider (optional, uses env var if not provided)")
+
+
+class LLMModelSyncResult(BaseModel):
+    """Response schema for LLM model sync operation"""
+    success: bool
+    provider: str
+    models_added: int
+    models_updated: int
+    models_deprecated: int
+    message: str
+
+

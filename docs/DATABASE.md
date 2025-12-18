@@ -101,8 +101,11 @@ CREATE TABLE attempts (
     is_answer_correct BOOLEAN NOT NULL,
     incorrect_answer TEXT,
     correct_answer TEXT NOT NULL,
-    qorder INTEGER                         -- Question order in session
+    qorder INTEGER,                        -- Question order in session
+    model_id INTEGER REFERENCES llm_models(id) ON DELETE SET NULL  -- FK to llm_models (Migration 013)
 );
+
+CREATE INDEX idx_attempts_model_id ON attempts(model_id);
 ```
 
 #### `question_patterns` - AI question templates
@@ -130,6 +133,69 @@ CREATE TABLE user_blocking_history (
     notes TEXT
 );
 ```
+
+#### `credit_usage` - AI credit usage tracking
+```sql
+CREATE TABLE credit_usage (
+    id SERIAL PRIMARY KEY,
+    uid VARCHAR NOT NULL,
+    usage_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    game_type VARCHAR(50) NOT NULL,        -- 'math', 'knowledge', 'dictation'
+    subject VARCHAR(100),                  -- Subject within game
+    sub_section VARCHAR(100),              -- Future: sub-section
+    credits_used INTEGER DEFAULT 1,
+    generation_count INTEGER DEFAULT 1,
+    model_id INTEGER REFERENCES llm_models(id) ON DELETE SET NULL,  -- FK to llm_models
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_credit_usage_uid ON credit_usage(uid);
+CREATE INDEX idx_credit_usage_date ON credit_usage(usage_date);
+CREATE INDEX idx_credit_usage_model_id ON credit_usage(model_id);
+CREATE UNIQUE INDEX uq_credit_usage_uid_date_game_subject 
+    ON credit_usage(uid, usage_date, game_type, COALESCE(subject, ''));
+```
+
+#### `llm_models` - AI model registry (Migration 012)
+Tracks available AI models from various providers. Supports manual overrides and deprecation.
+
+```sql
+CREATE TABLE llm_models (
+    id SERIAL PRIMARY KEY,
+    model_name VARCHAR(150) NOT NULL UNIQUE,  -- Provider-native name, e.g., 'models/gemini-2.0-flash'
+    display_name VARCHAR(150),                 -- Human-readable name
+    provider VARCHAR(50) NOT NULL,             -- 'google', 'groq', 'anthropic', 'openai'
+    model_type VARCHAR(50),                    -- 'flash', 'flash-lite', 'pro', etc.
+    version VARCHAR(20),                       -- '2.0', '2.5', etc.
+    order_number INTEGER DEFAULT 0 NOT NULL,   -- Display order
+    active BOOLEAN DEFAULT TRUE NOT NULL,      -- Only active models returned in API
+    deprecated BOOLEAN DEFAULT FALSE NOT NULL, -- Old models marked deprecated
+    manual BOOLEAN DEFAULT FALSE NOT NULL,     -- manual=true: never auto-updated by sync
+    last_seen_at TIMESTAMPTZ,                  -- Last time seen in provider API
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_llm_models_active ON llm_models(active) WHERE active = TRUE;
+CREATE INDEX idx_llm_models_provider ON llm_models(provider);
+CREATE INDEX idx_llm_models_order ON llm_models(order_number);
+CREATE INDEX idx_llm_models_deprecated ON llm_models(deprecated) WHERE deprecated = TRUE;
+```
+
+**Key Fields:**
+- `model_name`: Provider-native format (e.g., `models/gemini-2.0-flash`). When using Forge, prepend provider prefix in code: `Gemini/models/gemini-2.0-flash`
+- `manual`: When `true`, sync operations won't modify this model. Use for custom/override models.
+- `deprecated`: When `true`, model is no longer available from provider API but kept for historical reference.
+- `active`: When `false`, model won't be returned in public API but can still be referenced by old records.
+
+**Supported Providers:**
+- `google` - Google Gemini models
+- `groq` - Groq LLaMA models
+- `anthropic` - Anthropic Claude models
+- `openai` - OpenAI GPT models
+
+Extend `SUPPORTED_PROVIDERS` in [llm_service.py](../app/services/llm_service.py) to add new providers.
 
 ---
 
@@ -228,6 +294,11 @@ curl "https://python-smart-kids.vercel.app/admin/migration-status?admin_key=YOUR
 | 006 | Subscription column on users |
 | 007 | Prompts table with LLM tracking fields |
 | 008 | User blocking fields + simplified architecture |
+| 009 | Knowledge-based questions tables (subjects, knowledge_documents, knowledge_question_attempts) |
+| 010 | Game scores table (leaderboard) |
+| 011 | Credits column on users + credit_usage table |
+| 012 | LLM models table for tracking available AI models |
+| 013 | model_id FK references on credit_usage, attempts, knowledge_question_attempts |
 
 ---
 

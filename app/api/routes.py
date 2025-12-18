@@ -409,6 +409,168 @@ async def get_user_credit_usage(
         raise HTTPException(status_code=500, detail=f"Failed to get credit usage: {str(e)}")
 
 
+# ============================================================================
+# LLM Models Endpoints
+# ============================================================================
+
+@router.get("/llm-models")
+async def get_llm_models(provider: str = None):
+    """
+    Get all active LLM models.
+    
+    Args:
+        provider: Optional provider filter ('google', 'groq', 'anthropic', etc.)
+    
+    Returns:
+        List of active models ordered by order_number
+    """
+    try:
+        from app.services.llm_service import llm_service
+        models = llm_service.get_active_models(provider=provider)
+        return {
+            "success": True,
+            "models": models,
+            "count": len(models)
+        }
+    except Exception as e:
+        logger.error(f"Error getting LLM models: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get LLM models: {str(e)}")
+
+
+@router.get("/admin/llm-models")
+async def get_all_llm_models(admin_key: str = "", include_inactive: bool = True):
+    """
+    Get all LLM models including inactive/deprecated ones (admin endpoint).
+    
+    Args:
+        admin_key: Admin authentication key
+        include_inactive: Whether to include inactive models (default True)
+    
+    Returns:
+        List of all models
+    """
+    expected_key = os.getenv('ADMIN_KEY', 'dev-admin-key')
+    if admin_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+    
+    try:
+        from app.services.llm_service import llm_service
+        models = llm_service.get_all_models(include_inactive=include_inactive)
+        return {
+            "success": True,
+            "models": models,
+            "count": len(models)
+        }
+    except Exception as e:
+        logger.error(f"Error getting all LLM models: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get LLM models: {str(e)}")
+
+
+@router.post("/admin/llm-models/sync")
+async def sync_llm_models(
+    admin_key: str = "",
+    provider: str = "google",
+    api_key: str = None
+):
+    """
+    Sync LLM models from a provider's API.
+    
+    Logic:
+    - Fetch current models from provider API
+    - Skip models with manual=true
+    - Update/insert models with manual=false
+    - Mark missing models as deprecated and inactive
+    
+    Args:
+        admin_key: Admin authentication key
+        provider: Provider to sync from ('google', 'groq', 'anthropic', 'openai')
+        api_key: Optional API key (uses env var if not provided)
+    
+    Returns:
+        Sync result with counts of added/updated/deprecated models
+    """
+    expected_key = os.getenv('ADMIN_KEY', 'dev-admin-key')
+    if admin_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+    
+    try:
+        from app.services.llm_service import llm_service, SUPPORTED_PROVIDERS
+        
+        if provider not in SUPPORTED_PROVIDERS:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Unsupported provider: {provider}. Supported: {list(SUPPORTED_PROVIDERS.keys())}"
+            )
+        
+        result = llm_service.sync_models_from_provider(provider, api_key)
+        
+        logger.info(f"LLM models sync result for {provider}: {result['message']}")
+        
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error syncing LLM models from {provider}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to sync LLM models: {str(e)}")
+
+
+@router.patch("/admin/llm-models/{model_name:path}")
+async def update_llm_model(
+    model_name: str,
+    admin_key: str = "",
+    order_number: int = None,
+    active: bool = None,
+    manual: bool = None,
+    display_name: str = None
+):
+    """
+    Update an LLM model's properties.
+    
+    Args:
+        model_name: The model_name to update (URL-encoded, e.g., 'models%2Fgemini-2.0-flash')
+        admin_key: Admin authentication key
+        order_number: New display order
+        active: Whether the model is active
+        manual: Whether the model is manually managed (won't be auto-updated)
+        display_name: Human-readable name
+    
+    Returns:
+        Updated model
+    """
+    expected_key = os.getenv('ADMIN_KEY', 'dev-admin-key')
+    if admin_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+    
+    try:
+        from app.services.llm_service import llm_service
+        
+        updates = {}
+        if order_number is not None:
+            updates['order_number'] = order_number
+        if active is not None:
+            updates['active'] = active
+        if manual is not None:
+            updates['manual'] = manual
+        if display_name is not None:
+            updates['display_name'] = display_name
+        
+        if not updates:
+            raise HTTPException(status_code=400, detail="No valid update fields provided")
+        
+        result = llm_service.update_model(model_name, updates)
+        
+        if result['success']:
+            logger.info(f"Updated LLM model '{model_name}': {updates}")
+            return result
+        else:
+            raise HTTPException(status_code=404, detail=result.get('error', 'Model not found'))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating LLM model '{model_name}': {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update LLM model: {str(e)}")
+
+
 @router.post("/submit_attempt")
 async def submit_attempt(attempt: MathAttempt):
     db_service.save_attempt(attempt)
@@ -504,14 +666,18 @@ async def generate_questions(request: GenerateQuestionsRequest):
         new_credits = db_service.decrement_user_credits(request.uid)
         logger.info(f"Decremented credits for user {request.uid}, new balance: {new_credits}")
         
-        # Record credit usage for analytics
+        # Record credit usage for analytics (with model tracking)
         try:
             subject = f"level_{request.level}" if request.level else "general"
+            # Get model name from ai_summary for FK tracking
+            ai_summary = questions_response.get('ai_summary', {})
+            model_name = ai_summary.get('ai_model') if ai_summary else None
             db_service.record_credit_usage(
                 uid=request.uid,
                 game_type="math",
                 subject=subject,
-                credits_used=1
+                credits_used=1,
+                model_name=model_name
             )
         except Exception as usage_error:
             logger.warning(f"Failed to record credit usage (non-critical): {usage_error}")
@@ -994,13 +1160,17 @@ async def generate_knowledge_questions(request: dict):
             count
         )
         
-        # Record credit usage for analytics
+        # Record credit usage for analytics (with model tracking)
         try:
+            # Get model name from ai_summary for FK tracking
+            ai_summary = result.get('ai_summary', {})
+            model_name = ai_summary.get('ai_model') if ai_summary else None
             db_service.record_credit_usage(
                 uid=uid,
                 game_type="knowledge",
                 subject=subject['display_name'] if subject else None,
-                credits_used=1
+                credits_used=1,
+                model_name=model_name
             )
         except Exception as usage_error:
             logger.warning(f"Failed to record credit usage (non-critical): {usage_error}")

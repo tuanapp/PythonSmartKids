@@ -229,7 +229,7 @@ def adjust_user_credits(uid: str, amount: int, reason: str = None) -> dict:
 # Credit Usage Tracking Functions
 # ============================================================================
 
-def record_credit_usage(uid: str, game_type: str, subject: str = None, sub_section: str = None, credits_used: int = 1) -> dict:
+def record_credit_usage(uid: str, game_type: str, subject: str = None, sub_section: str = None, credits_used: int = 1, model_name: str = None) -> dict:
     """
     Record or update credit usage for a user on a specific game/subject for today.
     Uses upsert logic: if record exists for today, increment; otherwise create new.
@@ -240,25 +240,38 @@ def record_credit_usage(uid: str, game_type: str, subject: str = None, sub_secti
         subject: Subject within game (e.g., 'addition', 'multiplication')
         sub_section: Future: sub-section within subject
         credits_used: Number of credits used (default 1)
+        model_name: Optional AI model name used for generation (resolves to model_id FK)
         
     Returns:
         Dictionary with usage record details
     """
+    # Resolve model_name to model_id if provided
+    model_id = None
+    if model_name:
+        try:
+            from app.services.llm_service import llm_service
+            model_id = llm_service.get_model_id_by_name(model_name)
+            if model_id:
+                logger.debug(f"Resolved model '{model_name}' to model_id={model_id}")
+        except Exception as e:
+            logger.warning(f"Could not resolve model name '{model_name}': {e}")
+    
     try:
         conn = db_provider._get_connection()
         cursor = conn.cursor()
         
         # Use upsert to either create or update the record
         cursor.execute("""
-            INSERT INTO credit_usage (uid, usage_date, game_type, subject, sub_section, credits_used, generation_count)
-            VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, 1)
+            INSERT INTO credit_usage (uid, usage_date, game_type, subject, sub_section, credits_used, generation_count, model_id)
+            VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, 1, %s)
             ON CONFLICT (uid, usage_date, game_type, subject) 
             DO UPDATE SET 
                 credits_used = credit_usage.credits_used + EXCLUDED.credits_used,
                 generation_count = credit_usage.generation_count + 1,
+                model_id = COALESCE(EXCLUDED.model_id, credit_usage.model_id),
                 updated_at = CURRENT_TIMESTAMP
-            RETURNING id, usage_date, credits_used, generation_count
-        """, (uid, game_type, subject, sub_section, credits_used))
+            RETURNING id, usage_date, credits_used, generation_count, model_id
+        """, (uid, game_type, subject, sub_section, credits_used, model_id))
         
         result = cursor.fetchone()
         
@@ -267,12 +280,13 @@ def record_credit_usage(uid: str, game_type: str, subject: str = None, sub_secti
         conn.close()
         
         if result:
-            logger.info(f"Recorded credit usage for user {uid}: game={game_type}, subject={subject}, credits={result[2]}, count={result[3]}")
+            logger.info(f"Recorded credit usage for user {uid}: game={game_type}, subject={subject}, credits={result[2]}, count={result[3]}, model_id={result[4]}")
             return {
                 "id": result[0],
                 "usage_date": str(result[1]),
                 "credits_used": result[2],
-                "generation_count": result[3]
+                "generation_count": result[3],
+                "model_id": result[4]
             }
         return None
     except Exception as e:
@@ -297,17 +311,18 @@ def record_credit_usage(uid: str, game_type: str, subject: str = None, sub_secti
                     UPDATE credit_usage 
                     SET credits_used = credits_used + %s,
                         generation_count = generation_count + 1,
+                        model_id = COALESCE(%s, model_id),
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s
-                    RETURNING id, credits_used, generation_count
-                """, (credits_used, existing[0]))
+                    RETURNING id, credits_used, generation_count, model_id
+                """, (credits_used, model_id, existing[0]))
             else:
                 # Insert new record
                 cursor.execute("""
-                    INSERT INTO credit_usage (uid, usage_date, game_type, subject, sub_section, credits_used, generation_count)
-                    VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, 1)
-                    RETURNING id, credits_used, generation_count
-                """, (uid, game_type, subject, sub_section, credits_used))
+                    INSERT INTO credit_usage (uid, usage_date, game_type, subject, sub_section, credits_used, generation_count, model_id)
+                    VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, 1, %s)
+                    RETURNING id, credits_used, generation_count, model_id
+                """, (uid, game_type, subject, sub_section, credits_used, model_id))
             
             result = cursor.fetchone()
             conn.commit()
@@ -315,11 +330,12 @@ def record_credit_usage(uid: str, game_type: str, subject: str = None, sub_secti
             conn.close()
             
             if result:
-                logger.info(f"Recorded credit usage for user {uid}: game={game_type}, subject={subject}")
+                logger.info(f"Recorded credit usage for user {uid}: game={game_type}, subject={subject}, model_id={result[3]}")
                 return {
                     "id": result[0],
                     "credits_used": result[1],
-                    "generation_count": result[2]
+                    "generation_count": result[2],
+                    "model_id": result[3]
                 }
             return None
         except Exception as e2:
