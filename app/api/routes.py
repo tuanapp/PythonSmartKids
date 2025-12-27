@@ -1094,8 +1094,25 @@ async def generate_knowledge_questions(request: dict):
             new_credits = db_service.decrement_user_credits(uid)
             logger.info(f"Decremented credits for user {uid}, new balance: {new_credits}")
             
-            # Log usage (no document ID since LLM-only)
-            KnowledgeService.log_knowledge_usage(uid, None, subject_id, count)
+            # Log usage with analytics data
+            ai_summary = result.get('ai_summary', {})
+            KnowledgeService.log_knowledge_usage(
+                uid=uid,
+                knowledge_doc_id=None,
+                subject_id=subject_id,
+                question_count=count,
+                request_text=ai_summary.get('ai_request'),
+                response_text=ai_summary.get('ai_response'),
+                response_time_ms=ai_summary.get('generation_time_ms'),
+                model_name=ai_summary.get('ai_model'),
+                used_fallback=ai_summary.get('used_fallback'),
+                failed_models=ai_summary.get('failed_models'),
+                knowledge_document_ids=ai_summary.get('knowledge_document_ids'),
+                past_incorrect_attempts_count=ai_summary.get('past_incorrect_attempts_count'),
+                is_llm_only=ai_summary.get('is_llm_only'),
+                level=level,
+                focus_weak_areas=focus_weak_areas
+            )
             
             # Record credit usage
             try:
@@ -1152,12 +1169,24 @@ async def generate_knowledge_questions(request: dict):
         new_credits = db_service.decrement_user_credits(uid)
         logger.info(f"Decremented credits for user {uid}, new balance: {new_credits}")
         
-        # Log usage
+        # Log usage with analytics data
+        ai_summary = result.get('ai_summary', {})
         KnowledgeService.log_knowledge_usage(
-            uid,
-            knowledge_docs[0]['id'] if knowledge_docs else None,
-            subject_id,
-            count
+            uid=uid,
+            knowledge_doc_id=knowledge_docs[0]['id'] if knowledge_docs else None,
+            subject_id=subject_id,
+            question_count=count,
+            request_text=ai_summary.get('ai_request'),
+            response_text=ai_summary.get('ai_response'),
+            response_time_ms=ai_summary.get('generation_time_ms'),
+            model_name=ai_summary.get('ai_model'),
+            used_fallback=ai_summary.get('used_fallback'),
+            failed_models=ai_summary.get('failed_models'),
+            knowledge_document_ids=ai_summary.get('knowledge_document_ids'),
+            past_incorrect_attempts_count=ai_summary.get('past_incorrect_attempts_count'),
+            is_llm_only=ai_summary.get('is_llm_only'),
+            level=level,
+            focus_weak_areas=focus_weak_areas
         )
         
         # Record credit usage for analytics (with model tracking)

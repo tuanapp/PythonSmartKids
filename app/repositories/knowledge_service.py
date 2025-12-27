@@ -148,7 +148,19 @@ class KnowledgeService:
         uid: str,
         knowledge_doc_id: Optional[int],
         subject_id: int,
-        question_count: int
+        question_count: int,
+        request_text: Optional[str] = None,
+        response_text: Optional[str] = None,
+        response_time_ms: Optional[int] = None,
+        model_name: Optional[str] = None,
+        used_fallback: Optional[bool] = None,
+        failed_models: Optional[str] = None,
+        knowledge_document_ids: Optional[str] = None,
+        past_incorrect_attempts_count: Optional[int] = None,
+        is_llm_only: Optional[bool] = None,
+        level: Optional[int] = None,
+        focus_weak_areas: Optional[bool] = None,
+        log_type: str = 'knowledge'
     ):
         """
         Log knowledge document usage for analytics.
@@ -158,6 +170,18 @@ class KnowledgeService:
             knowledge_doc_id: ID of the knowledge document used (optional)
             subject_id: ID of the subject
             question_count: Number of questions generated
+            request_text: The AI prompt sent
+            response_text: The AI response received
+            response_time_ms: Generation time in milliseconds
+            model_name: AI model used
+            used_fallback: Whether fallback model was used
+            failed_models: Comma-separated list of models that failed before success
+            knowledge_document_ids: Comma-separated document IDs used
+            past_incorrect_attempts_count: Number of weak areas targeted
+            is_llm_only: Whether generation was LLM-only
+            level: Requested difficulty level (1-6)
+            focus_weak_areas: Whether weak areas mode was enabled
+            log_type: Type of log entry (defaults to 'knowledge')
         """
         try:
             conn = db_provider._get_connection()
@@ -166,10 +190,14 @@ class KnowledgeService:
             cursor.execute(
                 """
                 INSERT INTO knowledge_usage_log 
-                (uid, knowledge_doc_id, subject_id, question_count)
-                VALUES (%s, %s, %s, %s)
+                (uid, knowledge_doc_id, subject_id, question_count, request_text, response_text, 
+                 response_time_ms, model_name, used_fallback, failed_models, knowledge_document_ids,
+                 past_incorrect_attempts_count, is_llm_only, level, focus_weak_areas, log_type)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (uid, knowledge_doc_id, subject_id, question_count)
+                (uid, knowledge_doc_id, subject_id, question_count, request_text, response_text,
+                 response_time_ms, model_name, used_fallback, failed_models, knowledge_document_ids,
+                 past_incorrect_attempts_count, is_llm_only, level, focus_weak_areas, log_type)
             )
             conn.commit()
             cursor.close()

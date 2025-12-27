@@ -1,13 +1,16 @@
 import json
 from typing import List, Optional
 from openai import OpenAI
-from app.config import AI_BRIDGE_BASE_URL, AI_BRIDGE_API_KEY, AI_BRIDGE_MODEL, AI_FALLBACK_MODEL_1, HTTP_REFERER, APP_TITLE, MAX_ATTEMPTS_HISTORY_LIMIT
+from app.config import AI_BRIDGE_BASE_URL, AI_BRIDGE_API_KEY, AI_FALLBACK_MODEL_1, HTTP_REFERER, APP_TITLE, MAX_ATTEMPTS_HISTORY_LIMIT
 from app.validators.response_validator import OpenAIResponseValidator
 from app.services.prompt_service import PromptService
+from app.services.llm_service import llm_service
 import random
 from datetime import datetime, timedelta
 import logging
 import time
+
+from sqlalchemy import true
 
 current_response_text = ""
 logger = logging.getLogger(__name__)
@@ -20,7 +23,42 @@ client = OpenAI(
     }
 )
 
+
+def get_models_to_try() -> List[str]:
+    """
+    Get ordered list of models to try for AI generation.
+    
+    Priority:
+    1. Active, non-deprecated models from database (ordered by order_number)
+    2. FORGE_FALLBACK_MODEL_1 environment variable as ultimate fallback
+    
+    Returns:
+        List of Forge model names to try in order
+    """
+    # Get models from database (cached for 24 hours)
+    db_models = llm_service.get_ordered_forge_models(true) # TODO: diabled cache
+    
+    if db_models:
+        models = db_models.copy()
+        # Append fallback as ultimate last resort if not already in list
+        if AI_FALLBACK_MODEL_1 and AI_FALLBACK_MODEL_1 not in models:
+            models.append(AI_FALLBACK_MODEL_1)
+        return models
+    else:
+        # No models from DB - use only the fallback
+        logger.warning("No models from database, using FORGE_FALLBACK_MODEL_1 only")
+        if AI_FALLBACK_MODEL_1:
+            return [AI_FALLBACK_MODEL_1]
+        else:
+            logger.error("No fallback model configured!")
+            return []
+
+
 def get_analysis(student_data):
+    models_to_try = get_models_to_try()
+    if not models_to_try:
+        return {"analysis": "No AI models available", "questions": []}
+    
     messages = [{
         "role": "user",
         "content": (
@@ -37,22 +75,26 @@ def get_analysis(student_data):
 
     print("Attempts:", messages)
     
-    completion = client.chat.completions.create(
-        model=AI_BRIDGE_MODEL,
-        messages=messages
-    )
+    for model in models_to_try:
+        try:
+            completion = client.chat.completions.create(
+                model=model,
+                messages=messages
+            )
 
-    # Extract response
-    response_text = completion.choices[0].message.content
+            # Extract response
+            response_text = completion.choices[0].message.content
+            
+            try:
+                return json.loads(response_text)
+            except json.JSONDecodeError:
+                print("Error: AI did not return valid JSON.")
+                return {"analysis": "No valid response", "questions": []}
+        except Exception as e:
+            logger.warning(f"Model {model} failed: {e}, trying next...")
+            continue
     
-    try:
-        # Parse and return JSON
-        # Log the data before calling AI service
-        #logger.info("Data before AI analysis:\n" + json.dumps(response_text, indent=4))
-        return json.loads(response_text)
-    except json.JSONDecodeError:
-        print("Error: AI did not return valid JSON.")
-        return {"analysis": "No valid response", "questions": []}
+    return {"analysis": "All AI models failed", "questions": []}
 
 def analyze_attempts(attempts):
     """
@@ -298,17 +340,33 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
     # Determine which models to try (primary + fallback)
     api_key = ai_bridge_api_key or AI_BRIDGE_API_KEY
     base_url = ai_bridge_base_url or AI_BRIDGE_BASE_URL
-    primary_model = ai_bridge_model or AI_BRIDGE_MODEL
-    fallback_model = AI_FALLBACK_MODEL_1
     
-    # List of models to try in order
-    models_to_try = [primary_model]
-    # Only add fallback if it's different from primary and not empty
-    if fallback_model and fallback_model != primary_model:
-        models_to_try.append(fallback_model)
+    # Get models from database (cached) with fallback
+    # If ai_bridge_model is explicitly provided (e.g., for testing), use it as primary
+    if ai_bridge_model:
+        models_to_try = [ai_bridge_model]
+        if AI_FALLBACK_MODEL_1 and AI_FALLBACK_MODEL_1 != ai_bridge_model:
+            models_to_try.append(AI_FALLBACK_MODEL_1)
+    else:
+        models_to_try = get_models_to_try()
+    
+    if not models_to_try:
+        logger.error("No AI models available for question generation")
+        return {
+            'success': False,
+            'message': "No AI models available",
+            'questions': get_fallback_questions(patterns, count, level),
+            'ai_summary': {
+                'models_from_db': [],
+                'models_tried': [],
+                'models_failed': [],
+                'used_fallback': True
+            }
+        }
     
     last_error = None
     last_error_model = None
+    failed_models = []  # Track which models failed and why
     
     for attempt_index, model in enumerate(models_to_try):
         is_fallback_attempt = attempt_index > 0
@@ -411,6 +469,9 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
                         'generation_time_ms': response_time_ms,
                         'used_fallback': is_fallback_attempt,
                         'fallback_count': attempt_index,
+                        'models_from_db': models_to_try,
+                        'models_tried': models_to_try[:attempt_index + 1],
+                        'models_failed': failed_models,
                         'knowledge_document_ids': None,
                         'past_incorrect_attempts_count': len(weak_areas),
                         'is_valid': validation_result['is_valid'],
@@ -418,6 +479,8 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
                         'questions_validated': len(questions),
                         'errors_count': len(validation_result['errors']),
                         'warnings_count': len(validation_result['warnings']),
+                        'validation_errors': validation_result['errors'],
+                        'validation_warnings': validation_result['warnings'],
                         'historical_records': f"{len(attempts)} db attempts used out of {MAX_ATTEMPTS_HISTORY_LIMIT} max",
                         'level': level,
                         'is_new_user': is_new_user,
@@ -428,6 +491,7 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
                 # Validation failed - if we have more models to try, continue
                 last_error = f"Validation failed: {'; '.join(validation_result['errors'][:3])}"
                 last_error_model = model
+                failed_models.append({'model': model, 'error': last_error, 'error_type': 'validation_failed'})
                 
                 if is_fallback_attempt or len(models_to_try) == 1:
                     # This was the last model, fall back to hardcoded questions
@@ -468,6 +532,9 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
                         'generation_time_ms': response_time_ms,
                         'used_fallback': True,
                         'fallback_count': attempt_index + 1,
+                        'models_from_db': models_to_try,
+                        'models_tried': models_to_try[:attempt_index + 1],
+                        'models_failed': failed_models,
                         'knowledge_document_ids': None,
                         'past_incorrect_attempts_count': len(weak_areas),
                         'is_valid': False,
@@ -475,8 +542,8 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
                         'questions_validated': 0,
                         'errors_count': len(validation_result['errors']),
                         'warnings_count': len(validation_result['warnings']),
-                        'original_errors': validation_result['errors'],
-                        'original_warnings': validation_result['warnings'],
+                        'validation_errors': validation_result['errors'],
+                        'validation_warnings': validation_result['warnings'],
                         'historical_records': f"{len(attempts)} db attempts used out of {MAX_ATTEMPTS_HISTORY_LIMIT} max",
                         'level': level,
                         'is_new_user': is_new_user,
@@ -492,6 +559,7 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
         except json.JSONDecodeError as je:
             last_error = f"JSON decode error: {str(je)}"
             last_error_model = model
+            failed_models.append({'model': model, 'error': last_error, 'error_type': 'json_decode_error'})
             
             if is_fallback_attempt or len(models_to_try) == 1:
                 # Calculate response time even on error
@@ -527,6 +595,14 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
                     str(je), current_response_text, response_time_ms / 1000.0, attempts, level, prompt_text
                 )
                 fallback_result['prompt_id'] = prompt_id
+                fallback_result['ai_summary'] = {
+                    'ai_model': model,
+                    'models_from_db': models_to_try,
+                    'models_tried': models_to_try[:attempt_index + 1],
+                    'models_failed': failed_models,
+                    'used_fallback': True,
+                    'error_type': 'json_decode_error'
+                }
                 return fallback_result
             else:
                 # More models available, log and continue
@@ -536,6 +612,9 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
         except Exception as e:
             last_error = f"Exception: {str(e)}"
             last_error_model = model
+            # Check if it's a rate limit error
+            error_type = 'rate_limit' if '429' in str(e) or 'rate limit' in str(e).lower() else 'exception'
+            failed_models.append({'model': model, 'error': last_error, 'error_type': error_type})
             
             if is_fallback_attempt or len(models_to_try) == 1:
                 # Calculate response time even on error
@@ -572,6 +651,14 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
                     str(e), current_response_text, response_time_ms / 1000.0, attempts, level, prompt_text if prompt_text else ""
                 )
                 fallback_result['prompt_id'] = prompt_id
+                fallback_result['ai_summary'] = {
+                    'ai_model': model,
+                    'models_from_db': models_to_try,
+                    'models_tried': models_to_try[:attempt_index + 1],
+                    'models_failed': failed_models,
+                    'used_fallback': True,
+                    'error_type': error_type
+                }
                 return fallback_result
             else:
                 # More models available, log and continue
@@ -580,7 +667,7 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
     
     # This should not be reached, but just in case all models fail without returning
     logger.error(f"All AI models failed. Last error from {last_error_model}: {last_error}")
-    return generate_fallback_questions(
+    fallback_result = generate_fallback_questions(
         last_error or "All AI models failed", 
         current_response_text, 
         None, 
@@ -588,6 +675,15 @@ def generate_practice_questions(uid, attempts, patterns, ai_bridge_base_url=None
         level, 
         prompt_text if prompt_text else ""
     )
+    fallback_result['ai_summary'] = {
+        'ai_model': last_error_model,
+        'models_from_db': models_to_try,
+        'models_tried': models_to_try,
+        'models_failed': failed_models,
+        'used_fallback': True,
+        'error_type': 'all_models_failed'
+    }
+    return fallback_result
 
 def generate_fallback_questions(error_message="Unknown error occurred", current_response_text="", response_time=None, attempts=None, level=None, prompt_text=""):
     """Generate basic questions as a fallback if AI fails"""
@@ -656,7 +752,7 @@ def generate_fallback_questions(error_message="Unknown error occurred", current_
     result = {
         'questions': fallback_questions,
         'timestamp': datetime.now(),
-        'message': f"AI question generation failed: {error_message} {AI_BRIDGE_MODEL} {api_key_last3} {AI_BRIDGE_BASE_URL}",
+        'message': f"AI question generation failed: {error_message} (models from DB) {api_key_last3} {AI_BRIDGE_BASE_URL}",
         'response_time': response_time,
         'ai_summary': {
             'ai_request': prompt_text if prompt_text else f"Fallback questions generated due to error: {error_message}",
@@ -842,19 +938,21 @@ Generate ONLY valid JSON without any markdown formatting, explanations, or wrapp
     api_start_time = time.time()
     response_time_ms = None
     
-    # Determine which models to try (primary + fallback)
-    primary_model = AI_BRIDGE_MODEL
-    fallback_model = AI_FALLBACK_MODEL_1
+    # Get models from database (cached) with fallback
+    models_to_try = get_models_to_try()
     
-    # List of models to try in order
-    models_to_try = [primary_model]
-    # Only add fallback if it's different from primary and not empty
-    if fallback_model and fallback_model != primary_model:
-        models_to_try.append(fallback_model)
+    if not models_to_try:
+        logger.error("No AI models available for knowledge question generation")
+        return {
+            "success": False,
+            "questions": [],
+            "error": "No AI models available"
+        }
     
     last_error = None
     last_error_model = None
     response_text = None
+    failed_models = []
     
     for attempt_index, model_name in enumerate(models_to_try):
         is_fallback_attempt = attempt_index > 0
@@ -911,8 +1009,9 @@ Generate ONLY valid JSON without any markdown formatting, explanations, or wrapp
             
             # Log prompt usage
             try:
-                prompt_id = prompt_service.log_llm_interaction(
+                prompt_id = prompt_service.record_prompt(
                     uid=uid,
+                    request_type='knowledge_generation',
                     request_text=prompt_content,
                     response_text=response_text,
                     model_name=model_name,
@@ -937,6 +1036,7 @@ Generate ONLY valid JSON without any markdown formatting, explanations, or wrapp
                     'generation_time_ms': response_time_ms,
                     'used_fallback': is_fallback_attempt,
                     'fallback_count': attempt_index,
+                    'failed_models': ','.join(failed_models) if failed_models else None,
                     'knowledge_document_ids': knowledge_document_ids,
                     'past_incorrect_attempts_count': len(weak_areas),
                     'is_llm_only': not knowledge_document_ids or knowledge_document_ids.strip() == ''
@@ -946,6 +1046,7 @@ Generate ONLY valid JSON without any markdown formatting, explanations, or wrapp
         except json.JSONDecodeError as e:
             last_error = f"AI returned invalid JSON: {e}"
             last_error_model = model_name
+            failed_models.append(model_name)
             logger.error(f"Error parsing AI response as JSON from {model_name}: {e}")
             logger.error(f"Response was: {response_text if response_text else 'N/A'}")
             
@@ -958,6 +1059,7 @@ Generate ONLY valid JSON without any markdown formatting, explanations, or wrapp
         except Exception as e:
             last_error = str(e)
             last_error_model = model_name
+            failed_models.append(model_name)
             logger.error(f"Error generating knowledge-based questions with {model_name}: {e}")
             
             # If this was the last model, raise the error
@@ -1132,17 +1234,21 @@ Generate ONLY valid JSON without any markdown formatting, explanations, or wrapp
     api_start_time = time.time()
     response_time_ms = None
     
-    # Determine which models to try
-    primary_model = AI_BRIDGE_MODEL
-    fallback_model = AI_FALLBACK_MODEL_1
+    # Get models from database (cached) with fallback
+    models_to_try = get_models_to_try()
     
-    models_to_try = [primary_model]
-    if fallback_model and fallback_model != primary_model:
-        models_to_try.append(fallback_model)
+    if not models_to_try:
+        logger.error("No AI models available for LLM-only question generation")
+        return {
+            "success": False,
+            "questions": [],
+            "error": "No AI models available"
+        }
     
     last_error = None
     last_error_model = None
     response_text = None
+    failed_models = []
     
     for attempt_index, model_name in enumerate(models_to_try):
         is_fallback_attempt = attempt_index > 0
@@ -1196,8 +1302,9 @@ Generate ONLY valid JSON without any markdown formatting, explanations, or wrapp
             
             # Log prompt usage
             try:
-                prompt_id = prompt_service.log_llm_interaction(
+                prompt_id = prompt_service.record_prompt(
                     uid=uid,
+                    request_type='knowledge_generation',
                     request_text=prompt_content,
                     response_text=response_text,
                     model_name=model_name,
@@ -1222,6 +1329,7 @@ Generate ONLY valid JSON without any markdown formatting, explanations, or wrapp
                     'generation_time_ms': response_time_ms,
                     'used_fallback': is_fallback_attempt,
                     'fallback_count': attempt_index,
+                    'failed_models': ','.join(failed_models) if failed_models else None,
                     'knowledge_document_ids': None,
                     'past_incorrect_attempts_count': len(weak_areas),
                     'is_llm_only': True,
@@ -1232,6 +1340,7 @@ Generate ONLY valid JSON without any markdown formatting, explanations, or wrapp
         except json.JSONDecodeError as e:
             last_error = f"AI returned invalid JSON: {e}"
             last_error_model = model_name
+            failed_models.append(model_name)
             logger.error(f"Error parsing AI response as JSON from {model_name}: {e}")
             logger.error(f"Response was: {response_text if response_text else 'N/A'}")
             
@@ -1242,6 +1351,7 @@ Generate ONLY valid JSON without any markdown formatting, explanations, or wrapp
         except Exception as e:
             last_error = str(e)
             last_error_model = model_name
+            failed_models.append(model_name)
             logger.error(f"Error generating LLM-only questions with {model_name}: {e}")
             
             if attempt_index == len(models_to_try) - 1:
@@ -1310,14 +1420,12 @@ Generate ONLY valid JSON without markdown formatting or extra text."""
     
     logger.info(f"Evaluating {len(answers)} answers for {subject_name}")
     
-    # Determine which models to try (primary + fallback)
-    primary_model = AI_BRIDGE_MODEL
-    fallback_model = AI_FALLBACK_MODEL_1
+    # Get models from database (cached) with fallback
+    models_to_try = get_models_to_try()
     
-    # List of models to try in order
-    models_to_try = [primary_model]
-    if fallback_model and fallback_model != primary_model:
-        models_to_try.append(fallback_model)
+    if not models_to_try:
+        logger.error("No AI models available for answer evaluation")
+        return None
     
     last_error = None
     last_error_model = None
@@ -1356,8 +1464,9 @@ Generate ONLY valid JSON without markdown formatting or extra text."""
             # Log prompt usage
             if uid:
                 try:
-                    prompt_service.log_llm_interaction(
+                    prompt_service.record_prompt(
                         uid=uid,
+                        request_type='knowledge_evaluation',
                         request_text=prompt_content,
                         response_text=response_text,
                         model_name=model_name,

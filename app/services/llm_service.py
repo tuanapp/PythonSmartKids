@@ -6,9 +6,11 @@ Handles:
 - Managing model status (active, deprecated, manual)
 - Resolving model names to IDs for FK references
 - Generating Forge-compatible model names from provider-native names
+- Providing ordered list of models for AI generation (with caching)
 """
 import logging
 import requests
+import time
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 from app.db.db_factory import DatabaseFactory
@@ -16,13 +18,23 @@ from app.config import NEON_DBNAME, NEON_USER, NEON_PASSWORD, NEON_HOST
 
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+# Model Cache Configuration
+# =============================================================================
+# Cache for ordered Forge models (24-hour TTL)
+CACHE_TTL_SECONDS = 86400  # 24 hours
+
+_models_cache: Optional[List[str]] = None
+_cache_timestamp: float = 0.0
+
 
 # Extensible list of supported providers
 # Add new providers here with their API configuration
 SUPPORTED_PROVIDERS = {
     'google': {
         'name': 'Google',
-        'forge_prefix': 'Gemini',  # Prefix used in Forge: "Gemini/models/gemini-2.0-flash"
+        'forge_prefix': 'tensorblock',  # TensorBlock Forge format: "tensorblock/gemini-2.0-flash"
+        'model_name_strip': 'models/',   # Strip this prefix from model_name before formatting
         'api_url_template': 'https://generativelanguage.googleapis.com/v1beta/models?key={api_key}',
         'env_key': 'GOOGLE_API_KEY',
     },
@@ -110,54 +122,83 @@ class LLMService:
             logger.error(f"Error fetching active models: {e}")
             raise
     
-    def get_all_models(self, include_inactive: bool = True) -> List[Dict[str, Any]]:
+    def get_ordered_forge_models(self, force_refresh: bool = False) -> List[str]:
         """
-        Get all LLM models for admin purposes.
+        Get ordered list of active, non-deprecated models formatted as Forge API names.
+        
+        Results are cached for 24 hours (CACHE_TTL_SECONDS) to avoid DB queries on every AI call.
         
         Args:
-            include_inactive: Whether to include inactive models
+            force_refresh: If True, bypass cache and query database
         
         Returns:
-            List of all models ordered by provider, then order_number
+            List of Forge-formatted model names, e.g., ['tensorblock/gemini-2.0-flash', 'Groq/llama-3.3-70b-versatile']
+            Returns empty list if no models available or on error.
+        
+        Example:
+            models = llm_service.get_ordered_forge_models()
+            # Returns: ['tensorblock/gemini-2.0-flash', 'Groq/llama-3.3-70b-versatile', ...]
         """
+        global _models_cache, _cache_timestamp
+        
+        current_time = time.time()
+        cache_age = current_time - _cache_timestamp
+        
+        # Return cached models if valid and not force refresh
+        if not force_refresh and _models_cache is not None and cache_age < CACHE_TTL_SECONDS:
+            logger.debug(f"Using cached models list (age: {int(cache_age)}s, count: {len(_models_cache)})")
+            return _models_cache
+        
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             
-            if include_inactive:
-                cursor.execute("""
-                    SELECT id, model_name, display_name, provider, model_type, version,
-                           order_number, active, deprecated, manual, last_seen_at,
-                           created_at, updated_at
-                    FROM llm_models
-                    ORDER BY provider, order_number ASC
-                """)
-            else:
-                cursor.execute("""
-                    SELECT id, model_name, display_name, provider, model_type, version,
-                           order_number, active, deprecated, manual, last_seen_at,
-                           created_at, updated_at
-                    FROM llm_models
-                    WHERE active = TRUE
-                    ORDER BY provider, order_number ASC
-                """)
+            # Query active, non-deprecated models ordered by order_number
+            cursor.execute("""
+                SELECT model_name, provider
+                FROM llm_models
+                WHERE active = TRUE AND deprecated = FALSE
+                ORDER BY order_number ASC
+            """)
             
             rows = cursor.fetchall()
             cursor.close()
             conn.close()
             
-            return [self._row_to_model_dict(row) for row in rows]
+            # Format as Forge API names using SUPPORTED_PROVIDERS mapping
+            forge_models = []
+            for model_name, provider in rows:
+                provider_config = SUPPORTED_PROVIDERS.get(provider)
+                if provider_config:
+                    # Add provider prefixes back when retrieving from DB
+                    if provider == 'google':
+                        forge_name = f"tensorblock/{model_name}"
+                    else:
+                        forge_prefix = provider_config['forge_prefix']
+                        forge_name = f"{forge_prefix}/{model_name}"
+                    forge_models.append(forge_name)
+                else:
+                    # Unknown provider - skip with warning
+                    logger.warning(f"Unknown provider '{provider}' for model '{model_name}', skipping")
+            
+            # Update cache
+            _models_cache = forge_models
+            _cache_timestamp = current_time
+            
+            logger.info(f"Loaded {len(forge_models)} models from database (cache refreshed)")
+            return forge_models
             
         except Exception as e:
-            logger.error(f"Error fetching all models: {e}")
-            raise
+            logger.error(f"Error fetching ordered Forge models: {e}")
+            # Return empty list on error - caller should use fallback
+            return []
     
     def get_model_id_by_name(self, model_name: str) -> Optional[int]:
         """
         Look up model ID by model_name.
         
         Handles both provider-native names (e.g., 'models/gemini-2.0-flash')
-        and Forge-formatted names (e.g., 'Gemini/models/gemini-2.0-flash').
+        and Forge-formatted names (e.g., 'tensorblock/gemini-2.0-flash').
         
         Args:
             model_name: The model name to look up
@@ -166,15 +207,26 @@ class LLMService:
             Model ID if found, None otherwise
         """
         try:
-            # Strip Forge prefix if present
-            native_name = self._strip_forge_prefix(model_name)
+            # Strip prefixes to get the clean model name as stored in DB
+            clean_name = model_name
+            
+            # Strip Forge prefixes
+            for provider_config in SUPPORTED_PROVIDERS.values():
+                prefix = provider_config['forge_prefix'] + '/'
+                if clean_name.startswith(prefix):
+                    clean_name = clean_name[len(prefix):]
+                    break
+            
+            # Strip provider-native prefixes (e.g., 'models/' for Google)
+            if clean_name.startswith('models/'):
+                clean_name = clean_name[len('models/'):]
             
             conn = self._get_connection()
             cursor = conn.cursor()
             
             cursor.execute("""
                 SELECT id FROM llm_models WHERE model_name = %s
-            """, (native_name,))
+            """, (clean_name,))
             
             result = cursor.fetchone()
             cursor.close()
@@ -191,13 +243,27 @@ class LLMService:
         Update an LLM model's properties.
         
         Args:
-            model_name: The model_name to update
+            model_name: The model_name to update (can include prefixes, will be stripped)
             updates: Dict with fields to update (order_number, active, manual, display_name)
         
         Returns:
             Updated model dict or error
         """
         try:
+            # Strip prefixes to get the clean model name as stored in DB
+            clean_name = model_name
+            
+            # Strip Forge prefixes
+            for provider_config in SUPPORTED_PROVIDERS.values():
+                prefix = provider_config['forge_prefix'] + '/'
+                if clean_name.startswith(prefix):
+                    clean_name = clean_name[len(prefix):]
+                    break
+            
+            # Strip provider-native prefixes (e.g., 'models/' for Google)
+            if clean_name.startswith('models/'):
+                clean_name = clean_name[len('models/'):]
+            
             # Build dynamic update query
             allowed_fields = {'order_number', 'active', 'manual', 'display_name'}
             update_fields = {k: v for k, v in updates.items() if k in allowed_fields and v is not None}
@@ -209,7 +275,7 @@ class LLMService:
             update_fields['updated_at'] = datetime.now()
             
             set_clause = ', '.join([f"{k} = %s" for k in update_fields.keys()])
-            values = list(update_fields.values()) + [model_name]
+            values = list(update_fields.values()) + [clean_name]
             
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -304,11 +370,17 @@ class LLMService:
                 model_name = model_info['model_name']
                 api_model_names.add(model_name)
                 
-                if model_name in existing_models:
+                # Strip provider prefixes when storing in DB
+                if provider == 'google' and model_name.startswith('models/'):
+                    stored_model_name = model_name[len('models/'):]
+                else:
+                    stored_model_name = model_name
+                
+                if stored_model_name in existing_models:
                     # Model exists
-                    if existing_models[model_name]:
+                    if existing_models[stored_model_name]:
                         # manual=True, skip
-                        logger.debug(f"Skipping manual model: {model_name}")
+                        logger.debug(f"Skipping manual model: {stored_model_name}")
                         continue
                     else:
                         # manual=False, update last_seen_at
@@ -316,7 +388,7 @@ class LLMService:
                             UPDATE llm_models
                             SET last_seen_at = %s, updated_at = %s, order_number = %s
                             WHERE model_name = %s AND manual = FALSE
-                        """, (now, now, idx, model_name))
+                        """, (now, now, idx, stored_model_name))
                         models_updated += 1
                 else:
                     # New model, insert
@@ -326,7 +398,7 @@ class LLMService:
                          order_number, active, deprecated, manual, last_seen_at, created_at, updated_at)
                         VALUES (%s, %s, %s, %s, %s, %s, TRUE, FALSE, FALSE, %s, %s, %s)
                     """, (
-                        model_name,
+                        stored_model_name,  # Store without prefix
                         model_info.get('display_name'),
                         provider,
                         model_info.get('model_type'),
