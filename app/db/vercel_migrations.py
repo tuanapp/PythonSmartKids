@@ -169,6 +169,49 @@ class VercelMigrationManager:
                 """)
                 credit_usage_model_id_exists = cursor.fetchone()[0]
             
+            # Check if knowledge_usage_log table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'knowledge_usage_log'
+                )
+            """)
+            knowledge_usage_log_exists = cursor.fetchone()[0]
+            
+            # Check new columns in knowledge_usage_log
+            request_text_exists = False
+            response_text_exists = False
+            response_time_ms_exists = False
+            model_name_exists = False
+            used_fallback_exists = False
+            failed_models_exists = False
+            knowledge_document_ids_exists = False
+            past_incorrect_attempts_count_exists = False
+            is_llm_only_exists = False
+            level_exists = False
+            focus_weak_areas_exists = False
+            log_type_exists = False
+            
+            if knowledge_usage_log_exists:
+                cursor.execute("""
+                    SELECT column_name FROM information_schema.columns 
+                    WHERE table_name = 'knowledge_usage_log' 
+                    AND column_name IN ('request_text', 'response_text', 'response_time_ms', 'model_name', 'used_fallback', 'failed_models', 'knowledge_document_ids', 'past_incorrect_attempts_count', 'is_llm_only', 'level', 'focus_weak_areas', 'log_type')
+                """)
+                existing_columns = [row[0] for row in cursor.fetchall()]
+                request_text_exists = 'request_text' in existing_columns
+                response_text_exists = 'response_text' in existing_columns
+                response_time_ms_exists = 'response_time_ms' in existing_columns
+                model_name_exists = 'model_name' in existing_columns
+                used_fallback_exists = 'used_fallback' in existing_columns
+                failed_models_exists = 'failed_models' in existing_columns
+                knowledge_document_ids_exists = 'knowledge_document_ids' in existing_columns
+                past_incorrect_attempts_count_exists = 'past_incorrect_attempts_count' in existing_columns
+                is_llm_only_exists = 'is_llm_only' in existing_columns
+                level_exists = 'level' in existing_columns
+                focus_weak_areas_exists = 'focus_weak_areas' in existing_columns
+                log_type_exists = 'log_type' in existing_columns
+            
             cursor.close()
             conn.close()
             
@@ -190,8 +233,21 @@ class VercelMigrationManager:
                 'credit_usage_exists': credit_usage_exists,
                 'llm_models_exists': llm_models_exists,
                 'credit_usage_model_id_exists': credit_usage_model_id_exists,
+                'knowledge_usage_log_exists': knowledge_usage_log_exists,
+                'request_text_exists': request_text_exists,
+                'response_text_exists': response_text_exists,
+                'response_time_ms_exists': response_time_ms_exists,
+                'model_name_exists': model_name_exists,
+                'used_fallback_exists': used_fallback_exists,
+                'failed_models_exists': failed_models_exists,
+                'knowledge_document_ids_exists': knowledge_document_ids_exists,
+                'past_incorrect_attempts_count_exists': past_incorrect_attempts_count_exists,
+                'is_llm_only_exists': is_llm_only_exists,
+                'level_exists': level_exists,
+                'focus_weak_areas_exists': focus_weak_areas_exists,
+                'log_type_exists': log_type_exists,
                 'needs_migration': (
-                    current_version != '013' or  # Updated to latest version (LLM models + model references)
+                    current_version != '014' or  # Updated to latest version
                     not notes_column_exists or 
                     not level_column_exists or
                     not prompts_table_exists or
@@ -204,7 +260,20 @@ class VercelMigrationManager:
                     not credits_column_exists or
                     not credit_usage_exists or
                     not llm_models_exists or
-                    not credit_usage_model_id_exists
+                    not credit_usage_model_id_exists or
+                    not knowledge_usage_log_exists or
+                    not request_text_exists or
+                    not response_text_exists or
+                    not response_time_ms_exists or
+                    not model_name_exists or
+                    not used_fallback_exists or
+                    not failed_models_exists or
+                    not knowledge_document_ids_exists or
+                    not past_incorrect_attempts_count_exists or
+                    not is_llm_only_exists or
+                    not level_exists or
+                    not focus_weak_areas_exists or
+                    not log_type_exists
                 )
             }
             
@@ -263,6 +332,10 @@ class VercelMigrationManager:
             model_refs_result = self.add_model_references_migration()
             logger.info(f"Model references migration result: {model_refs_result['message']}")
             
+            # Add knowledge usage log enhancements
+            knowledge_usage_log_enhancement_result = self.add_knowledge_usage_log_enhancement_migration()
+            logger.info(f"Knowledge usage log enhancement migration result: {knowledge_usage_log_enhancement_result['message']}")
+            
             # Verify the migration was successful
             status = self.check_migration_status()
             
@@ -286,7 +359,8 @@ class VercelMigrationManager:
                     'Credits column on users',
                     'Credit usage table (analytics)',
                     'LLM models table',
-                    'Model ID references on tracking tables'
+                    'Model ID references on tracking tables',
+                    'Knowledge usage log enhancements'
                 ]
             }
             
@@ -1367,6 +1441,113 @@ class VercelMigrationManager:
             
         except Exception as e:
             logger.error(f"Error in migration 013: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def add_knowledge_usage_log_enhancement_migration(self) -> Dict[str, Any]:
+        """
+        Apply migration 014: Enhance knowledge_usage_log table with additional tracking columns.
+        
+        Adds the following nullable columns to knowledge_usage_log:
+        - request_text (TEXT)
+        - response_text (TEXT)
+        - response_time_ms (INTEGER)
+        - model_name (VARCHAR(100))
+        - used_fallback (BOOLEAN)
+        - failed_models (TEXT)
+        - knowledge_document_ids (TEXT)
+        - past_incorrect_attempts_count (INTEGER)
+        - is_llm_only (BOOLEAN)
+        - level (INTEGER)
+        - focus_weak_areas (BOOLEAN)
+        - log_type (VARCHAR(50)) - defaults to 'knowledge'
+        
+        Adds indexes on log_type, model_name, level if they don't exist.
+        """
+        try:
+            conn = self.db_provider._get_connection()
+            cursor = conn.cursor()
+            messages = []
+            
+            # List of columns to add
+            columns_to_add = [
+                ("request_text", "TEXT"),
+                ("response_text", "TEXT"),
+                ("response_time_ms", "INTEGER"),
+                ("model_name", "VARCHAR(100)"),
+                ("used_fallback", "BOOLEAN"),
+                ("failed_models", "TEXT"),
+                ("knowledge_document_ids", "TEXT"),
+                ("past_incorrect_attempts_count", "INTEGER"),
+                ("is_llm_only", "BOOLEAN"),
+                ("level", "INTEGER"),
+                ("focus_weak_areas", "BOOLEAN"),
+                ("log_type", "VARCHAR(50) DEFAULT 'knowledge'"),
+            ]
+            
+            # Check and add each column
+            for column_name, column_type in columns_to_add:
+                cursor.execute(f"""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.columns 
+                        WHERE table_name = 'knowledge_usage_log' AND column_name = '{column_name}'
+                    )
+                """)
+                column_exists = cursor.fetchone()[0]
+                
+                if not column_exists:
+                    cursor.execute(f"ALTER TABLE knowledge_usage_log ADD COLUMN {column_name} {column_type}")
+                    messages.append(f"Added {column_name} column to knowledge_usage_log table")
+                    logger.info(f"Added {column_name} column to knowledge_usage_log table")
+                else:
+                    messages.append(f"knowledge_usage_log.{column_name} already exists")
+            
+            # Check and add indexes
+            indexes_to_add = [
+                ("idx_knowledge_usage_log_log_type", "log_type"),
+                ("idx_knowledge_usage_log_model_name", "model_name"),
+                ("idx_knowledge_usage_log_level", "level"),
+            ]
+            
+            for index_name, column_name in indexes_to_add:
+                cursor.execute(f"""
+                    SELECT EXISTS (
+                        SELECT FROM pg_indexes 
+                        WHERE tablename = 'knowledge_usage_log' AND indexname = '{index_name}'
+                    )
+                """)
+                index_exists = cursor.fetchone()[0]
+                
+                if not index_exists:
+                    cursor.execute(f"CREATE INDEX {index_name} ON knowledge_usage_log({column_name})")
+                    messages.append(f"Created index {index_name} on knowledge_usage_log table")
+                    logger.info(f"Created index {index_name} on knowledge_usage_log table")
+                else:
+                    messages.append(f"Index {index_name} already exists")
+            
+            # Update migration version to 014
+            cursor.execute("""
+                DELETE FROM alembic_version WHERE version_num IN ('014', '013', '012', '011', '010', '009', '008', '007', '2d3eefae954c')
+            """)
+            cursor.execute("""
+                INSERT INTO alembic_version (version_num) VALUES ('014')
+                ON CONFLICT (version_num) DO NOTHING
+            """)
+            messages.append("Updated alembic version to 014")
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            return {
+                'success': True,
+                'message': '; '.join(messages) if messages else 'Migration 014 already applied'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in migration 014: {e}")
             return {
                 'success': False,
                 'error': str(e)
