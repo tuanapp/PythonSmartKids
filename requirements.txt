@@ -13,3 +13,4 @@ pandas
 langgraph
 google-genai
 #sentence-transformers
+langsmith

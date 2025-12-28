@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 from app.models.schemas import MathAttempt, GenerateQuestionsRequest, UserRegistration, UserProfileUpdate, AdjustCreditsRequest
 from app.services import ai_service
 from app.services.ai_service import generate_practice_questions
@@ -575,6 +575,8 @@ async def update_llm_model(
 @router.post("/submit_attempt")
 async def submit_attempt(attempt: MathAttempt):
     db_service.save_attempt(attempt)
+    # Invalidate performance report cache when new attempts are added
+    performance_report_service.invalidate_cache()
     return {"message": attempt.question + " Attempt saved successfully - xx " +  datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
 @router.get("/analyze_student/{uid}")
@@ -1743,12 +1745,13 @@ async def check_performance_report_availability(student_uid: str):
         raise HTTPException(status_code=500, detail=f"Failed to check report availability: {str(e)}")
 
 @router.get("/performance-report/{student_uid}")
-async def generate_performance_report(student_uid: str):
+async def generate_performance_report(student_uid: str, admin_key: str = Header(None)):
     """
     Generate a comprehensive performance report for a student using the agentic workflow.
 
     Args:
         student_uid: Firebase User UID
+        admin_key: Optional admin key header for bypassing cooldown
 
     Returns:
         Dictionary containing the analysis report and metadata
@@ -1770,8 +1773,8 @@ async def generate_performance_report(student_uid: str):
                 }
             )
 
-        # Generate the performance report
-        result = performance_report_service.generate_performance_report(student_uid)
+        # Generate the performance report (pass admin_key for cooldown bypass)
+        result = performance_report_service.generate_performance_report(student_uid, admin_key)
 
         if result["success"]:
             return {
@@ -1782,21 +1785,360 @@ async def generate_performance_report(student_uid: str):
                 "evidence_quality_score": result["evidence_quality_score"],
                 "retrieval_attempts": result["retrieval_attempts"],
                 "execution_log": result["execution_log"],
+                "agent_statuses": result.get("agent_statuses", {}),
+                "workflow_progress": result.get("workflow_progress", []),
+                "errors": result.get("errors", []),
+                "processing_time_ms": result.get("processing_time_ms", 0),
+                "model_used": result.get("model_used", ""),
+                "trace_id": result.get("trace_id"),
                 "timestamp": result["timestamp"],
                 "message": "Performance report generated successfully"
             }
         else:
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "error": "report_generation_failed",
-                    "message": result.get("error", "Unknown error during report generation"),
-                    "student_uid": student_uid
-                }
-            )
+            # Handle cooldown errors specifically
+            if result.get("error") == "daily_limit_exceeded":
+                raise HTTPException(
+                    status_code=429,  # Too Many Requests
+                    detail={
+                        "error": "daily_limit_exceeded",
+                        "message": "Performance report can only be generated once every 24 hours",
+                        "cooldown_remaining": result.get("cooldown_remaining", 0),
+                        "cooldown_end": result.get("cooldown_end"),
+                        "student_uid": student_uid
+                    }
+                )
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail={
+                        "error": "report_generation_failed",
+                        "message": result.get("error", "Unknown error during report generation"),
+                        "errors": result.get("errors", []),
+                        "student_uid": student_uid
+                    }
+                )
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error generating performance report: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate performance report: {str(e)}")
+
+@router.get("/performance-report/{student_uid}/history")
+async def get_performance_reports_history(student_uid: str):
+    """
+    Retrieve the history of performance reports for a student.
+
+    Args:
+        student_uid: Firebase User UID
+
+    Returns:
+        List of performance reports
+    """
+    try:
+        reports = performance_report_service.get_performance_reports(student_uid)
+        return {
+            "success": True,
+            "student_uid": student_uid,
+            "reports": reports,
+            "count": len(reports),
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error retrieving performance reports: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve performance reports: {str(e)}")
+
+@router.post("/admin/analytics/reports")
+async def get_performance_reports_analytics(admin_key: str = ""):
+    """Get analytics for performance reports (admin only)"""
+    # Simple admin verification
+    expected_key = os.getenv('ADMIN_KEY', 'dev-admin-key')
+    if admin_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+
+    try:
+        db = DatabaseFactory.get_provider()
+        conn = db._get_connection()
+        cursor = conn.cursor()
+
+        # Get total reports count
+        cursor.execute("SELECT COUNT(*) FROM performance_reports")
+        total_reports = cursor.fetchone()[0]
+
+        # Get success rate
+        cursor.execute("""
+            SELECT
+                COUNT(*) as total,
+                SUM(CASE WHEN success THEN 1 ELSE 0 END) as successful
+            FROM performance_reports
+        """)
+        result = cursor.fetchone()
+        success_rate = (result[1] / result[0] * 100) if result[0] > 0 else 0
+
+        # Get reports by date (last 30 days)
+        cursor.execute("""
+            SELECT
+                DATE(created_at) as report_date,
+                COUNT(*) as count,
+                SUM(CASE WHEN success THEN 1 ELSE 0 END) as successful
+            FROM performance_reports
+            WHERE created_at >= NOW() - INTERVAL '30 days'
+            GROUP BY DATE(created_at)
+            ORDER BY report_date DESC
+        """)
+        daily_stats = [
+            {
+                "date": str(row[0]),
+                "total": row[1],
+                "successful": row[2],
+                "success_rate": (row[2] / row[1] * 100) if row[1] > 0 else 0
+            }
+            for row in cursor.fetchall()
+        ]
+
+        # Get average processing time
+        cursor.execute("""
+            SELECT AVG(processing_time_ms)
+            FROM performance_reports
+            WHERE processing_time_ms IS NOT NULL
+        """)
+        avg_processing_time = cursor.fetchone()[0] or 0
+
+        conn.close()
+
+        return {
+            "success": True,
+            "analytics": {
+                "total_reports": total_reports,
+                "success_rate": round(success_rate, 2),
+                "average_processing_time_ms": round(avg_processing_time, 2),
+                "daily_stats": daily_stats
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting analytics: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get analytics: {str(e)}")
+
+@router.post("/admin/reports/bulk-regenerate")
+async def bulk_regenerate_reports(admin_key: str = "", limit: int = 10):
+    """Bulk regenerate performance reports for users who don't have recent reports (admin only)"""
+    # Simple admin verification
+    expected_key = os.getenv('ADMIN_KEY', 'dev-admin-key')
+    if admin_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+
+    try:
+        db = DatabaseFactory.get_provider()
+        conn = db._get_connection()
+        cursor = conn.cursor()
+
+        # Find users who haven't had reports in the last 24 hours and have attempts
+        cursor.execute("""
+            SELECT DISTINCT u.uid, u.name
+            FROM users u
+            LEFT JOIN performance_reports pr ON u.uid = pr.uid AND pr.created_at >= NOW() - INTERVAL '24 hours'
+            JOIN knowledge_question_attempts kqa ON u.uid = kqa.uid
+            WHERE pr.id IS NULL
+            AND u.is_blocked = FALSE
+            LIMIT %s
+        """, (limit,))
+
+        users_to_process = cursor.fetchall()
+        conn.close()
+
+        results = []
+        for uid, name in users_to_process:
+            try:
+                # Generate report without cooldown check (admin override)
+                result = performance_report_service.generate_performance_report(uid, admin_key)
+                results.append({
+                    "uid": uid,
+                    "name": name,
+                    "success": result["success"],
+                    "message": "Report generated successfully" if result["success"] else result.get("error", "Unknown error")
+                })
+            except Exception as e:
+                results.append({
+                    "uid": uid,
+                    "name": name,
+                    "success": False,
+                    "message": str(e)
+                })
+
+        return {
+            "success": True,
+            "processed": len(results),
+            "results": results,
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Error in bulk regeneration: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to bulk regenerate reports: {str(e)}")
+
+@router.get("/performance-reports/{student_uid}")
+async def get_performance_reports(student_uid: str):
+    """
+    Retrieve all performance reports for a student.
+
+    Args:
+        student_uid: Firebase User UID
+
+    Returns:
+        List of performance reports
+    """
+    try:
+        reports = performance_report_service.get_performance_reports(student_uid)
+        return {
+            "success": True,
+            "student_uid": student_uid,
+            "reports": reports,
+            "count": len(reports),
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error retrieving performance reports: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve performance reports: {str(e)}")
+
+@router.post("/admin/performance-reports/analytics")
+async def get_performance_reports_analytics(admin_key: str = Header(None)):
+    """
+    Get analytics for performance reports (admin only).
+
+    Args:
+        admin_key: Admin authentication key
+
+    Returns:
+        Analytics data for performance reports
+    """
+    # Simple admin verification
+    expected_key = os.getenv('ADMIN_KEY', 'dev-admin-key')
+    if admin_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+
+    try:
+        db = DatabaseFactory.get_provider()
+        conn = db._get_connection()
+        cursor = conn.cursor()
+
+        # Get total reports count
+        cursor.execute("SELECT COUNT(*) FROM performance_reports")
+        total_reports = cursor.fetchone()[0]
+
+        # Get success rate
+        cursor.execute("SELECT COUNT(*) FROM performance_reports WHERE success = TRUE")
+        successful_reports = cursor.fetchone()[0]
+
+        # Get reports by date (last 30 days)
+        cursor.execute("""
+            SELECT DATE(created_at), COUNT(*)
+            FROM performance_reports
+            WHERE created_at >= NOW() - INTERVAL '30 days'
+            GROUP BY DATE(created_at)
+            ORDER BY DATE(created_at)
+        """)
+        daily_stats = [{"date": str(row[0]), "count": row[1]} for row in cursor.fetchall()]
+
+        # Get average processing time
+        cursor.execute("SELECT AVG(processing_time_ms) FROM performance_reports WHERE processing_time_ms > 0")
+        avg_processing_time = cursor.fetchone()[0] or 0
+
+        # Get top users by report count
+        cursor.execute("""
+            SELECT uid, COUNT(*) as report_count
+            FROM performance_reports
+            GROUP BY uid
+            ORDER BY report_count DESC
+            LIMIT 10
+        """)
+        top_users = [{"uid": row[0], "report_count": row[1]} for row in cursor.fetchall()]
+
+        cursor.close()
+        conn.close()
+
+        success_rate = (successful_reports / total_reports * 100) if total_reports > 0 else 0
+
+        return {
+            "success": True,
+            "analytics": {
+                "total_reports": total_reports,
+                "successful_reports": successful_reports,
+                "success_rate": round(success_rate, 2),
+                "average_processing_time_ms": round(avg_processing_time, 2),
+                "daily_stats": daily_stats,
+                "top_users": top_users
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting performance reports analytics: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get analytics: {str(e)}")
+
+@router.post("/admin/performance-reports/bulk-regenerate")
+async def bulk_regenerate_reports(admin_key: str = Header(None), days_back: int = 7):
+    """
+    Bulk regenerate performance reports for users who had reports in the last N days (admin only).
+
+    Args:
+        admin_key: Admin authentication key
+        days_back: Number of days to look back for users with reports
+
+    Returns:
+        Status of bulk regeneration job
+    """
+    # Simple admin verification
+    expected_key = os.getenv('ADMIN_KEY', 'dev-admin-key')
+    if admin_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+
+    try:
+        db = DatabaseFactory.get_provider()
+        conn = db._get_connection()
+        cursor = conn.cursor()
+
+        # Get distinct UIDs who had reports in the last N days
+        cursor.execute("""
+            SELECT DISTINCT uid
+            FROM performance_reports
+            WHERE created_at >= NOW() - INTERVAL '%s days'
+        """, (days_back,))
+
+        uids = [row[0] for row in cursor.fetchall()]
+        cursor.close()
+        conn.close()
+
+        # Start background regeneration (simplified - in production use a job queue)
+        regenerated_count = 0
+        failed_count = 0
+        results = []
+
+        for uid in uids:
+            try:
+                # Force regeneration by passing admin key
+                result = performance_report_service.generate_performance_report(uid, admin_key)
+                if result["success"]:
+                    regenerated_count += 1
+                    results.append({"uid": uid, "status": "success"})
+                else:
+                    failed_count += 1
+                    results.append({"uid": uid, "status": "failed", "error": result.get("error")})
+            except Exception as e:
+                failed_count += 1
+                results.append({"uid": uid, "status": "error", "error": str(e)})
+
+        return {
+            "success": True,
+            "message": f"Bulk regeneration completed. {regenerated_count} successful, {failed_count} failed.",
+            "total_users": len(uids),
+            "regenerated_count": regenerated_count,
+            "failed_count": failed_count,
+            "results": results,
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Error in bulk regeneration: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to start bulk regeneration: {str(e)}")
