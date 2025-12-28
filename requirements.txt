@@ -8,3 +8,8 @@ psycopg2-binary
 alembic
 sqlalchemy
 requests
+neo4j
+pandas
+langgraph
+google-genai
+sentence-transformers

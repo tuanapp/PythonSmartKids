@@ -4,6 +4,7 @@ from app.services import ai_service
 from app.services.ai_service import generate_practice_questions
 from app.services.prompt_service import PromptService
 from app.services.user_blocking_service import UserBlockingService
+from app.services.performance_report_service import performance_report_service
 from app.repositories import db_service
 from app.db.vercel_migrations import migration_manager
 from app.db.models import get_session
@@ -1685,29 +1686,117 @@ async def get_user_scores(uid: str, game_type: str = None, limit: int = 10):
 async def get_user_best_scores_endpoint(uid: str, game_type: str, limit: int = 3):
     """
     Get a user's best scores for a specific game type.
-    
+
     For multiplication_time: returns top scores by highest correct answers
     For multiplication_range: returns top scores by lowest completion time
-    
+
     Args:
         uid: User's Firebase UID
         game_type: 'multiplication_time' or 'multiplication_range'
         limit: Number of best scores to return (default: 3)
     """
     from app.repositories import db_service
-    
+
     if game_type not in ['multiplication_time', 'multiplication_range']:
         raise HTTPException(status_code=400, detail="Invalid game_type. Must be 'multiplication_time' or 'multiplication_range'")
-    
+
     try:
         result = db_service.get_user_best_scores(uid=uid, game_type=game_type, limit=limit)
         return result
-            
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error fetching user best scores: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch user best scores: {str(e)}")
 
+# ============================================================================
+# Performance Report Endpoints
+# ============================================================================
 
+@router.get("/performance-report/{student_uid}/check-availability")
+async def check_performance_report_availability(student_uid: str):
+    """
+    Check if sufficient data is available to generate a performance report for a student.
 
+    Args:
+        student_uid: Firebase User UID
+
+    Returns:
+        Dictionary indicating data availability and readiness for report generation
+    """
+    try:
+        result = performance_report_service.check_data_availability(student_uid)
+        return {
+            "success": True,
+            "student_uid": student_uid,
+            "can_generate_report": result.get("can_generate_report", False),
+            "student_exists": result.get("student_exists", False),
+            "attempts_count": result.get("attempts_count", 0),
+            "sufficient_data": result.get("sufficient_data", False),
+            "neo4j_available": result.get("neo4j_available", False),
+            "message": "Report generation available" if result.get("can_generate_report") else "Insufficient data for report generation",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error checking performance report availability: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to check report availability: {str(e)}")
+
+@router.get("/performance-report/{student_uid}")
+async def generate_performance_report(student_uid: str):
+    """
+    Generate a comprehensive performance report for a student using the agentic workflow.
+
+    Args:
+        student_uid: Firebase User UID
+
+    Returns:
+        Dictionary containing the analysis report and metadata
+    """
+    try:
+        # Check if report generation is possible
+        availability = performance_report_service.check_data_availability(student_uid)
+        if not availability.get("can_generate_report", False):
+            error_msg = f"Cannot generate report: {availability.get('error', 'Insufficient data or Neo4j unavailable')}"
+            logger.warning(error_msg)
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "insufficient_data",
+                    "message": error_msg,
+                    "student_exists": availability.get("student_exists", False),
+                    "attempts_count": availability.get("attempts_count", 0),
+                    "neo4j_available": availability.get("neo4j_available", False)
+                }
+            )
+
+        # Generate the performance report
+        result = performance_report_service.generate_performance_report(student_uid)
+
+        if result["success"]:
+            return {
+                "success": True,
+                "student_uid": student_uid,
+                "analysis_report": result["analysis_report"],
+                "evidence_sufficient": result["evidence_sufficient"],
+                "evidence_quality_score": result["evidence_quality_score"],
+                "retrieval_attempts": result["retrieval_attempts"],
+                "execution_log": result["execution_log"],
+                "timestamp": result["timestamp"],
+                "message": "Performance report generated successfully"
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "report_generation_failed",
+                    "message": result.get("error", "Unknown error during report generation"),
+                    "student_uid": student_uid
+                }
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating performance report: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate performance report: {str(e)}")
