@@ -1401,9 +1401,14 @@ def evaluate_answers_with_ai(
 For each question-answer pair, evaluate the student's answer and provide:
 1. Status: 'correct', 'incorrect', or 'partial'
 2. Score: 0.0 to 1.0 (0.0 = completely wrong, 1.0 = perfect)
-3. Feedback: Brief explanation of why the answer is correct/incorrect
-4. Best Answer: The ideal answer with explanation
-5. Improvement Tips: Specific tips if the answer needs improvement (can be null if correct)
+3. Feedback: Brief explanation of why the answer is correct/incorrect.
+    should be in a language that a child can understand 
+    and help the student understand their mistakes and learn better also knowledge about the concepts around it.
+4. Best Answer: The ideal easy to remember short answer a student in the suitable question level should provide 
+5. Improvement Tips: Explanation & Specific tips if the answer needs improvement (can be null if correct)
+    When suitable, provide step by step instruction on how to approach the problem and reach the solution.
+    When suitable, use relatabe simple easy to understand examples or diagrams. 
+    Provide Tips on how easily the student can remember this concept.
 
 **Questions and Answers:**
 {json.dumps(answers, indent=2)}
