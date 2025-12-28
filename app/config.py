@@ -42,3 +42,21 @@ MAX_ATTEMPTS_HISTORY_LIMIT = int(os.getenv("MAX_ATTEMPTS_HISTORY_LIMIT", "20"))
 
 # Testing settings
 RUN_REAL_API_TESTS = os.getenv("RUN_REAL_API_TESTS", "False").lower() == "true"
+
+# Below are Phase B - Reporting/Analytics configurations
+
+# Neo4j settings for performance reports
+NEO4J_URI = os.getenv("NEO4J_URI", "neo4j+s://969d50b9.databases.neo4j.io")
+NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "neo4j")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
+NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
+
+# Gemini AI settings
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+
+# Embedding model settings
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "384"))
+
+# Retry configuration for agentic workflow
+MAX_RETRIEVAL_RETRIES = int(os.getenv("MAX_RETRIEVAL_RETRIES", "2"))
