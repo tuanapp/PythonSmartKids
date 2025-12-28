@@ -212,6 +212,15 @@ class VercelMigrationManager:
                 focus_weak_areas_exists = 'focus_weak_areas' in existing_columns
                 log_type_exists = 'log_type' in existing_columns
             
+            # Check if performance_reports table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'performance_reports'
+                )
+            """)
+            performance_reports_exists = cursor.fetchone()[0]
+            
             cursor.close()
             conn.close()
             
@@ -246,8 +255,10 @@ class VercelMigrationManager:
                 'level_exists': level_exists,
                 'focus_weak_areas_exists': focus_weak_areas_exists,
                 'log_type_exists': log_type_exists,
+                'performance_reports_exists': performance_reports_exists,
                 'needs_migration': (
-                    current_version != '014' or  # Updated to latest version
+                    current_version != '015' or  # Updated to latest version
+                    not performance_reports_exists or
                     not notes_column_exists or 
                     not level_column_exists or
                     not prompts_table_exists or
@@ -336,6 +347,10 @@ class VercelMigrationManager:
             knowledge_usage_log_enhancement_result = self.add_knowledge_usage_log_enhancement_migration()
             logger.info(f"Knowledge usage log enhancement migration result: {knowledge_usage_log_enhancement_result['message']}")
             
+            # Add performance reports table
+            performance_reports_result = self.apply_migration_015()
+            logger.info(f"Performance reports migration result: {performance_reports_result['message']}")
+            
             # Verify the migration was successful
             status = self.check_migration_status()
             
@@ -360,7 +375,8 @@ class VercelMigrationManager:
                     'Credit usage table (analytics)',
                     'LLM models table',
                     'Model ID references on tracking tables',
-                    'Knowledge usage log enhancements'
+                    'Knowledge usage log enhancements',
+                    'Performance reports table'
                 ]
             }
             
@@ -1548,6 +1564,112 @@ class VercelMigrationManager:
             
         except Exception as e:
             logger.error(f"Error in migration 014: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def apply_migration_015(self):
+        """
+        Apply migration 015: Add performance_reports table for persistent storage of student performance reports.
+
+        Creates the performance_reports table with the following columns:
+        - id (SERIAL PRIMARY KEY)
+        - uid (VARCHAR NOT NULL, REFERENCES users(uid) ON DELETE CASCADE)
+        - report_content (TEXT NOT NULL)
+        - report_format (VARCHAR(50) DEFAULT 'markdown')
+        - agent_statuses (JSONB)
+        - execution_log (JSONB)
+        - traces (VARCHAR(255))
+        - evidence_sufficient (BOOLEAN DEFAULT FALSE)
+        - evidence_quality_score (FLOAT)
+        - retrieval_attempts (INTEGER DEFAULT 1)
+        - errors (JSONB)
+        - success (BOOLEAN DEFAULT TRUE)
+        - processing_time_ms (INTEGER)
+        - model_used (VARCHAR(100))
+        - created_at (TIMESTAMPTZ DEFAULT NOW())
+        - updated_at (TIMESTAMPTZ DEFAULT NOW())
+
+        Adds indexes on uid, created_at, and success for efficient queries.
+        """
+        try:
+            conn = self.db_provider._get_connection()
+            cursor = conn.cursor()
+            messages = []
+
+            # Create alembic_version table if it doesn't exist
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) PRIMARY KEY)
+            """)
+
+            # Create performance_reports table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS performance_reports (
+                    id SERIAL PRIMARY KEY,
+                    uid VARCHAR NOT NULL REFERENCES users(uid) ON DELETE CASCADE,
+                    report_content TEXT NOT NULL,
+                    report_format VARCHAR(50) DEFAULT 'markdown',
+                    agent_statuses JSONB,
+                    execution_log JSONB,
+                    traces VARCHAR(255),
+                    evidence_sufficient BOOLEAN DEFAULT FALSE,
+                    evidence_quality_score FLOAT,
+                    retrieval_attempts INTEGER DEFAULT 1,
+                    errors JSONB,
+                    success BOOLEAN DEFAULT TRUE,
+                    processing_time_ms INTEGER,
+                    model_used VARCHAR(100),
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            messages.append("Created performance_reports table")
+
+            # Create indexes
+            indexes = [
+                ("idx_performance_reports_uid", "uid"),
+                ("idx_performance_reports_created_at", "created_at"),
+                ("idx_performance_reports_success", "success")
+            ]
+
+            for index_name, column_name in indexes:
+                cursor.execute(f"""
+                    SELECT EXISTS (
+                        SELECT FROM pg_indexes
+                        WHERE tablename = 'performance_reports' AND indexname = '{index_name}'
+                    )
+                """)
+                index_exists = cursor.fetchone()[0]
+
+                if not index_exists:
+                    cursor.execute(f"CREATE INDEX {index_name} ON performance_reports({column_name})")
+                    messages.append(f"Created index {index_name}")
+                    logger.info(f"Created index {index_name} on performance_reports table")
+                else:
+                    messages.append(f"Index {index_name} already exists")
+
+            # Update migration version to 015
+            cursor.execute("""
+                DELETE FROM alembic_version WHERE version_num IN ('015', '014', '013', '012', '011', '010', '009', '008', '007', '2d3eefae954c')
+            """)
+            cursor.execute("""
+                INSERT INTO alembic_version (version_num) VALUES ('015')
+                ON CONFLICT (version_num) DO NOTHING
+            """)
+            messages.append("Updated alembic version to 015")
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            return {
+                'success': True,
+                'message': '; '.join(messages) if messages else 'Migration 015 already applied'
+            }
+
+        except Exception as e:
+            logger.error(f"Error in migration 015: {e}")
             return {
                 'success': False,
                 'error': str(e)
