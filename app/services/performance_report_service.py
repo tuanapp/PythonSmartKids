@@ -16,10 +16,10 @@ from neo4j import GraphDatabase
 
 # Optional imports with fallback
 try:
-    from sentence_transformers import SentenceTransformer
+    import sentence_transformers
     SENTENCE_TRANSFORMERS_AVAILABLE = True
 except ImportError:
-    SentenceTransformer = None
+    sentence_transformers = None
     SENTENCE_TRANSFORMERS_AVAILABLE = False
 
 try:
@@ -172,6 +172,7 @@ class DataIngesterAgent:
         
         if SENTENCE_TRANSFORMERS_AVAILABLE:
             try:
+                from sentence_transformers import SentenceTransformer
                 self.embedding_model = SentenceTransformer(EMBEDDING_MODEL)
                 logger.info("✅ SentenceTransformer loaded successfully")
             except Exception as e:
@@ -403,7 +404,7 @@ class DataIngesterAgent:
 class RetrieverAgent:
     """Agent 2: Hybrid retrieval using Neo4j's unified graph + vector capabilities with evidence quality assessment."""
 
-    def __init__(self, neo4j_driver, embedding_model: SentenceTransformer):
+    def __init__(self, neo4j_driver, embedding_model):
         self.neo4j_driver = neo4j_driver
         self.embedding_model = embedding_model
 
