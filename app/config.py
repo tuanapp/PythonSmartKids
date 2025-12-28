@@ -60,3 +60,8 @@ EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "384"))
 
 # Retry configuration for agentic workflow
 MAX_RETRIEVAL_RETRIES = int(os.getenv("MAX_RETRIEVAL_RETRIES", "2"))
+
+# LangSmith tracing settings (optional)
+LANGSMITH_API_KEY = os.getenv('LANGSMITH_API_KEY', '')
+LANGSMITH_PROJECT = os.getenv('LANGSMITH_PROJECT', 'pr-internal-mesenchyme-70')
+LANGSMITH_TRACING = os.getenv('LANGSMITH_TRACING', 'false').lower() == 'true'
