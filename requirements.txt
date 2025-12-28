@@ -12,4 +12,4 @@ neo4j
 pandas
 langgraph
 google-genai
-sentence-transformers
+#sentence-transformers
