@@ -1824,7 +1824,7 @@ async def generate_performance_report(student_uid: str, admin_key: str = Header(
         logger.error(f"Error generating performance report: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate performance report: {str(e)}")
 
-@router.get("/performance-report/{student_uid}/history")
+@router.get("/performance-report-history/{student_uid}")
 async def get_performance_reports_history(student_uid: str):
     """
     Retrieve the history of performance reports for a student.
@@ -2001,6 +2001,32 @@ async def get_performance_reports(student_uid: str):
     except Exception as e:
         logger.error(f"Error retrieving performance reports: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve performance reports: {str(e)}")
+
+
+@router.get("/performance-reports/{student_uid}/latest")
+async def get_latest_performance_report(student_uid: str):
+    """
+    Retrieve the latest performance report for a student.
+
+    Returns the most recent report or a 404 if none exist.
+    """
+    try:
+        reports = performance_report_service.get_performance_reports(student_uid)
+        if not reports:
+            raise HTTPException(status_code=404, detail="No performance reports found for this student")
+
+        latest = reports[0]
+        return {
+            "success": True,
+            "student_uid": student_uid,
+            "report": latest,
+            "timestamp": datetime.now().isoformat()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving latest performance report: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve latest report: {str(e)}")
 
 @router.post("/admin/performance-reports/analytics")
 async def get_performance_reports_analytics(admin_key: str = Header(None)):

@@ -806,18 +806,36 @@ class PerformanceReportService:
             """, (student_uid,))
 
             reports = []
+            def _safe_load(val, default=None):
+                if val is None:
+                    return default
+                # If DB driver already returned parsed JSON (dict/list), return as-is
+                if isinstance(val, (dict, list)):
+                    return val
+                # If it's bytes, decode
+                if isinstance(val, (bytes, bytearray)):
+                    try:
+                        val = val.decode('utf-8')
+                    except Exception:
+                        return default
+                # Finally try to parse JSON string
+                try:
+                    return json.loads(val)
+                except Exception:
+                    return default
+
             for row in cursor.fetchall():
                 reports.append({
                     'id': row[0],
                     'report_content': row[1],
                     'report_format': row[2],
-                    'agent_statuses': json.loads(row[3]) if row[3] else {},
-                    'execution_log': json.loads(row[4]) if row[4] else [],
+                    'agent_statuses': _safe_load(row[3], {}),
+                    'execution_log': _safe_load(row[4], []),
                     'trace_id': row[5],
                     'evidence_sufficient': row[6],
                     'evidence_quality_score': row[7],
                     'retrieval_attempts': row[8],
-                    'errors': json.loads(row[9]) if row[9] else [],
+                    'errors': _safe_load(row[9], []),
                     'success': row[10],
                     'processing_time_ms': row[11],
                     'model_used': row[12],
