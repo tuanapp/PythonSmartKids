@@ -5,16 +5,16 @@ This document summarizes the flow implemented in `performance_report_service.py`
 ## High-Level Flow
 
 1. Intent routing
-   - `IntentRouterAgent` classifies as `report` or `qa`.
-   - It extracts `subject` and `topic` from the query when possible.
+   - `IntentRouterAgent` classifies as `report` or `qa` using heuristics + optional LLM check.
+   - It extracts `subject` and `topic` from aliases/keywords when possible.
 
 2. Input guardrails
    - Mask PII, detect prompt injection, and disallowed content.
    - If blocked, the request returns a safe response immediately.
 
 3. Branch by intent
-   - Report: full multi-agent report generation with cooldown check.
-   - QA: targeted retrieval and focused answer for a specific subject/topic.
+   - Report: full multi-agent report generation with cooldown check (optional skip-ingestion path).
+   - QA: targeted retrieval and focused answer for a specific subject/topic (skips ingestion).
 
 ## QA Flow (intent = qa)
 
@@ -23,47 +23,52 @@ This document summarizes the flow implemented in `performance_report_service.py`
 
 2. Fallback context (Postgres)
    - `_build_qa_fallback_answer` queries `knowledge_question_attempts` with keyword filters.
-   - The “Most missed questions” list is extracted and injected into the QA context.
+   - The "Most missed questions" list is extracted and injected into the QA context when available.
 
-3. Neo4j retrieval loop (max retries)
-   - Graph context: per-subject correct/incorrect counts, filtered by subject/topic.
-   - Vector context: similarity search over attempt embeddings, filtered by subject/topic.
-   - Hybrid context: graph + vector + fallback combined.
+3. Neo4j retrieval loop (max retries, skip ingestion)
+   - Uses existing Neo4j data (no re-import) for Q&A.
+   - Graph context: subject/topic accuracy plus hierarchical breakdown (Topic -> SubTopic -> Concept).
+   - Vector context: similarity search over attempt embeddings with hierarchical metadata.
+   - Hybrid context: graph + question-type breakdown + vector + fallback combined.
 
 4. Evidence check
-   - `assess_evidence_quality` computes a score (0–1) from summary lengths and attempt counts.
+   - `assess_evidence_quality` computes a score (0-1) from summary lengths and attempt counts.
    - Evidence is sufficient if score >= 0.7 or any subject has >= `MIN_ATTEMPTS_PER_SUBJECT` attempts.
 
 5. Answer generation
    - `AnalystAgent.generate_answer` uses a scoped prompt:
-     - accuracy for topic (if available)
-     - missed examples
-     - a targeted improvement tip
+     - hierarchical weak concepts (Topic -> SubTopic -> Concept)
+     - difficulty + Bloom's levels when available
+     - missed examples and targeted improvement tips
 
 6. Output guardrails + fallback
    - Output guardrails filter disallowed content.
-   - If the answer is “insufficient evidence” despite adequate evidence, fallback DB summary is used.
+   - If the answer is empty or "insufficient evidence" despite adequate evidence, fallback DB summary is used.
 
 ## Report Flow (intent = report)
 
 1. Cooldown check
    - Enforces 24-hour cooldown using `performance_reports` timestamps.
 
-2. Workflow
-   - `DataIngesterAgent` loads Postgres data, imports to Neo4j, and builds embeddings.
+2. Workflow (two paths)
+   - Default: `DataIngesterAgent` loads Postgres data, imports to Neo4j with hierarchical categorization,
+     creates embeddings + vector index.
+   - Optional: `admin_key='skip_data_ingester'` runs Retriever + Analyst only (reuse existing Neo4j data).
    - Retrieval loop runs without subject/topic filters.
-   - `AnalystAgent.generate_report` creates the full markdown report.
+   - `AnalystAgent.generate_report` creates the full markdown report using hierarchical context.
 
 3. Persistence
    - Results are saved to `performance_reports` with metadata.
+   - Optional LangSmith tracing is recorded when configured.
 
 ## Key Implementation Details
 
-- Intent routing returns `{intent, subject, topic}`.
+- Intent routing returns `{intent, subject, topic}` with heuristic + LLM fallback.
 - QA fallback context is always constructed and merged into the QA context.
 - Retrieval retries until evidence is sufficient or retry limit reached.
-- Responses include `model_used`, `model_configured`, and masked `api_key_used`.
-- Safety checks exist on input and output.
+- Hierarchical taxonomy: Topic -> SubTopic -> Concept, plus Difficulty + Bloom's levels.
+- Responses include `model_used`, `model_configured`, masked `api_key_used`, and `trace_id`.
+- Safety checks exist on input and output, with guardrail details included in the response.
 
 ## Typical Response Fields
 
@@ -73,4 +78,5 @@ This document summarizes the flow implemented in `performance_report_service.py`
 - `evidence_sufficient`, `evidence_quality_score`
 - `retrieval_attempts`, `processing_time_ms`
 - `model_used`, `model_configured`, `api_key_used`
-- `guardrails`, `trace_id`, `timestamp`
+- `guardrails`, `agent_statuses`, `workflow_progress`, `errors`
+- `trace_id`, `timestamp`

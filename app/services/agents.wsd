@@ -18,10 +18,11 @@ note right
   - QA: "what", "which", "most often"
   - Report: "generate report", "full"
   - Default: QA
+  - Optional LLM classification when available
 end note
 
 |Guardrails|
-:InputGuardrails: Mask PII, check injection;
+:InputGuardrails: Mask PII, check injection/disallowed content;
 if (Blocked by guardrails?) then (yes)
   :Return blocked response;
   stop
@@ -36,14 +37,19 @@ if (Intent == "report") then (yes)
     stop
   endif
   
-  |DataIngesterAgent|
-  :extract_data (Postgres);
-  :import_to_neo4j_with_embeddings;
-  note right
-    - Wipe Neo4j
-    - Generate Embeddings
-    - Create Vector Index
-  end note
+  if (admin_key = "skip_data_ingester"?) then (yes)
+    :Reuse existing Neo4j data;
+  else (no)
+    |DataIngesterAgent|
+    :extract_data (Postgres);
+    :import_to_neo4j_with_embeddings;
+    note right
+      - Wipe Neo4j
+      - Hierarchical categorization
+      - Generate Embeddings
+      - Create Vector Index
+    end note
+  endif
 
   |RetrieverAgent|
   repeat
@@ -52,16 +58,22 @@ if (Intent == "report") then (yes)
     :retrieve_hybrid_context;
     :assess_evidence_quality;
   repeat while (Evidence sufficient OR max retries?) is (no)
+  note right
+    - Graph includes Topic/SubTopic/Concept breakdown
+    - Hybrid merges vector context + fallback
+  end note
   
   |AnalystAgent|
   :generate_report (Gemini AI);
   :Save to performance_reports;
+  note right: Optional LangSmith tracing
 
 else (no: Q&A Path)
   |System/Database|
   :Build fallback context (SQL);
   note right: Extracts most missed questions
 
+  :Reuse existing Neo4j data;
   |RetrieverAgent|
   repeat
     :retrieve_graph_context (Filtered);
@@ -69,6 +81,10 @@ else (no: Q&A Path)
     :retrieve_hybrid_context;
     :assess_evidence_quality;
   repeat while (Evidence sufficient OR max retries?) is (no)
+  note right
+    - Graph includes Topic/SubTopic/Concept breakdown
+    - Hybrid merges vector context + fallback
+  end note
 
   |AnalystAgent|
   :generate_answer (Gemini AI);
@@ -77,7 +93,7 @@ else (no: Q&A Path)
   :OutputGuardrails Check;
   
   |System/Database|
-  if (No AI answer?) then (yes)
+  if (Empty/insufficient AI answer?) then (yes)
     :Use database fallback answer;
   endif
   :Save to performance_reports;
@@ -88,6 +104,6 @@ endif
 stop
 
 footer
-  **Response Includes:** agents_executed, execution_path, response_source, quality_scores, is_fallback
+  **Response Includes:** agents_executed, execution_path, response_source, quality_scores, is_fallback, guardrails
 end footer
 @enduml
