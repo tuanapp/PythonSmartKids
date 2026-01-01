@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Header
-from app.models.schemas import MathAttempt, GenerateQuestionsRequest, UserRegistration, UserProfileUpdate, AdjustCreditsRequest
+from app.models.schemas import MathAttempt, GenerateQuestionsRequest, UserRegistration, UserProfileUpdate, AdjustCreditsRequest, PerformanceReportQueryRequest
 from app.services import ai_service
 from app.services.ai_service import generate_practice_questions
 from app.services.prompt_service import PromptService
@@ -1801,7 +1801,7 @@ async def generate_performance_report(student_uid: str, admin_key: str = Header(
                     status_code=429,  # Too Many Requests
                     detail={
                         "error": "daily_limit_exceeded",
-                        "message": "Performance report can only be generated once every 24 hours",
+                        "message": "SmartBoy Limit: Performance report can only be generated once every 24 hours",
                         "cooldown_remaining": result.get("cooldown_remaining", 0),
                         "cooldown_end": result.get("cooldown_end"),
                         "student_uid": student_uid
@@ -1823,6 +1823,77 @@ async def generate_performance_report(student_uid: str, admin_key: str = Header(
     except Exception as e:
         logger.error(f"Error generating performance report: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate performance report: {str(e)}")
+
+@router.post("/performance-report/{student_uid}/query")
+async def query_performance_report(student_uid: str, request: PerformanceReportQueryRequest):
+    """
+    Answer user questions about a student's performance report details.
+
+    Args:
+        student_uid: Firebase User UID
+        request: Query payload with optional subject filter
+    """
+    try:
+        result = performance_report_service.handle_performance_request(
+            student_uid=student_uid,
+            query_text=request.query,
+            intent=None
+        )
+
+        if not result.get("success", False):
+            if result.get("error") == "daily_limit_exceeded":
+                raise HTTPException(
+                    status_code=429,
+                    detail={
+                        "error": "daily_limit_exceeded",
+                        "message": result.get(
+                            "message",
+                            "SmartBoy Limit: Performance report can only be generated once every 24 hours"
+                        ),
+                        "cooldown_remaining": result.get("cooldown_remaining", 0),
+                        "cooldown_end": result.get("cooldown_end"),
+                        "model_used": result.get("model_used", ""),
+                        "model_configured": result.get("model_configured", ""),
+                        "model_invoked": result.get("model_invoked", False),
+                        "api_key_used": result.get("api_key_used", ""),
+                        "intent": result.get("intent"),
+                        "student_uid": student_uid
+                    }
+                )
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": result.get("error", "query_failed"),
+                    "message": result.get("message", "Failed to answer performance query"),
+                    "model_used": result.get("model_used", ""),
+                    "model_configured": result.get("model_configured", ""),
+                    "api_key_used": result.get("api_key_used", ""),
+                    "intent": result.get("intent"),
+                    "student_uid": student_uid
+                }
+            )
+
+        return {
+            "success": True,
+            "student_uid": student_uid,
+            "query": result.get("query", request.query),
+            "answer": result.get("answer"),
+            "message": result.get("message"),
+            "evidence_sufficient": result.get("evidence_sufficient"),
+            "evidence_quality_score": result.get("evidence_quality_score"),
+            "retrieval_attempts": result.get("retrieval_attempts"),
+            "execution_log": result.get("execution_log", []),
+            "guardrails": result.get("guardrails", {}),
+            "processing_time_ms": result.get("processing_time_ms", 0),
+            "model_used": result.get("model_used", ""),
+            "model_configured": result.get("model_configured", ""),
+            "api_key_used": result.get("api_key_used", "")
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error answering performance report query: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to answer performance query: {str(e)}")
 
 @router.get("/performance-report-history/{student_uid}")
 async def get_performance_reports_history(student_uid: str):

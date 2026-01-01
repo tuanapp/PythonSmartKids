@@ -2,8 +2,11 @@
 Knowledge Service - Manages subjects and knowledge documents for knowledge-based questions
 """
 
-from typing import List, Optional
+from typing import List, Optional, Tuple
+from datetime import datetime
 from app.db.db_factory import DatabaseFactory
+# TODO: evaluate & decide later
+# from app.services.performance_report_service import performance_report_service
 import logging
 
 logger = logging.getLogger(__name__)
@@ -14,6 +17,42 @@ db_provider = DatabaseFactory.get_provider()
 
 class KnowledgeService:
     """Service for managing subjects and knowledge documents"""
+
+    @staticmethod
+    def _match_subject_from_query(query_text: str) -> Optional[dict]:
+        try:
+            subjects = KnowledgeService.get_all_subjects()
+        except Exception:
+            return None
+
+        query_lower = query_text.lower()
+        for subject in subjects:
+            name = (subject.get("name") or "").lower()
+            display_name = (subject.get("display_name") or "").lower()
+            if name and name in query_lower:
+                return subject
+            if display_name and display_name in query_lower:
+                return subject
+        return None
+
+    @staticmethod
+    def _extract_topic_filter(query_text: str) -> Tuple[Optional[str], List[str]]:
+        topic_keywords = {
+            "grammar": ["grammar", "tenses", "parts of speech", "sentence structure"],
+            "vocabulary": ["vocabulary", "vocab", "word meaning", "synonym", "antonym"],
+            "reading comprehension": ["reading comprehension", "comprehension", "reading", "passage"],
+            "spelling": ["spelling", "spell"],
+            "punctuation": ["punctuation", "comma", "period", "apostrophe"],
+            "writing": ["writing", "essay", "paragraph", "story"],
+        }
+
+        query_lower = query_text.lower()
+        for topic, keywords in topic_keywords.items():
+            for keyword in keywords:
+                if keyword in query_lower:
+                    return topic, keywords
+
+        return None, []
     
     @staticmethod
     def get_all_subjects(grade_level: Optional[int] = None) -> List[dict]:
@@ -54,6 +93,167 @@ class KnowledgeService:
         except Exception as e:
             logger.error(f"Error fetching subjects: {e}")
             raise
+
+    @staticmethod
+    def answer_performance_query(
+        uid: str,
+        query_text: str,
+        subject_id: Optional[int] = None,
+        limit: int = 5
+    ) -> dict:
+        """
+        Answer user questions about performance details using knowledge attempts data.
+
+        Args:
+            uid: Firebase User UID
+            query_text: User question text
+            subject_id: Optional subject ID to filter
+            limit: Max number of items to return in top_missed
+        """
+        cleaned_query = (query_text or "").strip()
+        if len(cleaned_query) < 3:
+            return {
+                "success": False,
+                "error": "query_too_short",
+                "message": "Please provide a more specific question."
+            }
+
+        subject = None
+        if subject_id:
+            subject = KnowledgeService.get_subject_by_id(subject_id)
+        else:
+            subject = KnowledgeService._match_subject_from_query(cleaned_query)
+
+        topic_label, topic_keywords = KnowledgeService._extract_topic_filter(cleaned_query)
+
+        try:
+            conn = db_provider._get_connection()
+            cursor = conn.cursor()
+
+            query = """
+                SELECT question, topic, evaluation_status, created_at, subject_id
+                FROM knowledge_question_attempts
+                WHERE uid = %s
+            """
+            params = [uid]
+
+            if subject:
+                query += " AND subject_id = %s"
+                params.append(subject["id"])
+
+            query += " ORDER BY created_at DESC"
+
+            cursor.execute(query, tuple(params))
+            rows = cursor.fetchall()
+
+            cursor.close()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Error answering performance query: {e}")
+            raise
+
+        attempts = [
+            {
+                "question": row[0],
+                "topic": row[1],
+                "evaluation_status": row[2],
+                "created_at": row[3],
+                "subject_id": row[4]
+            }
+            for row in rows
+        ]
+
+        if topic_keywords:
+            filtered = []
+            for attempt in attempts:
+                topic_text = (attempt.get("topic") or "").lower()
+                question_text = (attempt.get("question") or "").lower()
+                if any(keyword in topic_text or keyword in question_text for keyword in topic_keywords):
+                    filtered.append(attempt)
+            attempts = filtered
+
+        total = len(attempts)
+        correct = sum(1 for a in attempts if (a.get("evaluation_status") or "").lower() == "correct")
+        incorrect = total - correct
+        accuracy = round((correct / total) * 100, 1) if total > 0 else 0.0
+
+        missed_groups = {}
+        for attempt in attempts:
+            status = (attempt.get("evaluation_status") or "").lower()
+            if status == "correct":
+                continue
+            question = attempt.get("question") or ""
+            topic = attempt.get("topic")
+            key = (question, topic)
+            if key not in missed_groups:
+                missed_groups[key] = {
+                    "question": question,
+                    "topic": topic,
+                    "incorrect_count": 0,
+                    "last_attempted": None
+                }
+            missed_groups[key]["incorrect_count"] += 1
+            created_at = attempt.get("created_at")
+            last_attempted = missed_groups[key]["last_attempted"]
+            if created_at and (last_attempted is None or created_at > last_attempted):
+                missed_groups[key]["last_attempted"] = created_at
+
+        def sort_key(item: dict) -> Tuple[int, float]:
+            last_attempted = item.get("last_attempted")
+            last_ts = last_attempted.timestamp() if last_attempted else 0.0
+            return (-item["incorrect_count"], -last_ts)
+
+        top_missed = sorted(missed_groups.values(), key=sort_key)[:max(1, min(limit, 20))]
+
+        for item in top_missed:
+            if item["last_attempted"]:
+                item["last_attempted"] = item["last_attempted"].isoformat()
+
+        subject_label = None
+        if subject:
+            subject_label = subject.get("display_name") or subject.get("name")
+
+        if total == 0:
+            return {
+                "success": True,
+                "student_uid": uid,
+                "query": cleaned_query,
+                "subject": subject,
+                "topic_filter": topic_label,
+                "stats": {
+                    "total": 0,
+                    "correct": 0,
+                    "incorrect": 0,
+                    "accuracy": 0.0
+                },
+                "top_missed": [],
+                "answer": "No matching attempts were found for this question.",
+                "message": "No matching attempts were found for this question."
+            }
+
+        subject_part = f" for {subject_label}" if subject_label else ""
+        topic_part = f" in {topic_label}" if topic_label else ""
+        answer = (
+            f"Found {incorrect} incorrect out of {total} attempts{subject_part}{topic_part}. "
+            f"Accuracy is {accuracy}%."
+        )
+
+        return {
+            "success": True,
+            "student_uid": uid,
+            "query": cleaned_query,
+            "subject": subject,
+            "topic_filter": topic_label,
+            "stats": {
+                "total": total,
+                "correct": correct,
+                "incorrect": incorrect,
+                "accuracy": accuracy
+            },
+            "top_missed": top_missed,
+            "answer": answer,
+            "message": "Performance query answered successfully."
+        }
     
     @staticmethod
     def get_subject_by_id(subject_id: int) -> Optional[dict]:
@@ -262,6 +462,10 @@ class KnowledgeService:
             conn.close()
             
             logger.debug(f"Saved knowledge attempt for user {uid}")
+            
+            # TODO: evaluate & decide later
+            # Invalidate performance report cache when new attempts are added
+            # performance_report_service.invalidate_cache()
             
         except Exception as e:
             logger.error(f"Error saving knowledge attempt: {e}")
