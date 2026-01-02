@@ -111,6 +111,19 @@ class VercelMigrationManager:
             """)
             subjects_exists = cursor.fetchone()[0]
             
+            # Check visual limit columns in subjects table
+            visual_json_max_exists = False
+            visual_svg_max_exists = False
+            if subjects_exists:
+                cursor.execute("""
+                    SELECT column_name FROM information_schema.columns 
+                    WHERE table_name = 'subjects' 
+                    AND column_name IN ('visual_json_max', 'visual_svg_max')
+                """)
+                existing_visual_columns = [row[0] for row in cursor.fetchall()]
+                visual_json_max_exists = 'visual_json_max' in existing_visual_columns
+                visual_svg_max_exists = 'visual_svg_max' in existing_visual_columns
+            
             # Check if knowledge_documents table exists
             cursor.execute("""
                 SELECT EXISTS (
@@ -236,6 +249,8 @@ class VercelMigrationManager:
                 'user_blocking_history_exists': user_blocking_history_exists,
                 'question_generations_exists': question_generations_exists,
                 'subjects_exists': subjects_exists,
+                'visual_json_max_exists': visual_json_max_exists,
+                'visual_svg_max_exists': visual_svg_max_exists,
                 'knowledge_documents_exists': knowledge_documents_exists,
                 'game_scores_exists': game_scores_exists,
                 'credits_column_exists': credits_column_exists,
@@ -257,7 +272,7 @@ class VercelMigrationManager:
                 'log_type_exists': log_type_exists,
                 'performance_reports_exists': performance_reports_exists,
                 'needs_migration': (
-                    current_version != '015' or  # Updated to latest version
+                    current_version != '016' or  # Updated to latest version
                     not performance_reports_exists or
                     not notes_column_exists or 
                     not level_column_exists or
@@ -266,6 +281,8 @@ class VercelMigrationManager:
                     not user_blocking_exists or
                     not user_blocking_history_exists or
                     not subjects_exists or
+                    not visual_json_max_exists or
+                    not visual_svg_max_exists or
                     not knowledge_documents_exists or
                     not game_scores_exists or
                     not credits_column_exists or
@@ -351,6 +368,10 @@ class VercelMigrationManager:
             performance_reports_result = self.apply_migration_015()
             logger.info(f"Performance reports migration result: {performance_reports_result['message']}")
             
+            # Add visual limits to subjects table
+            visual_limits_result = self.apply_migration_016()
+            logger.info(f"Visual limits migration result: {visual_limits_result['message']}")
+            
             # Verify the migration was successful
             status = self.check_migration_status()
             
@@ -376,7 +397,8 @@ class VercelMigrationManager:
                     'LLM models table',
                     'Model ID references on tracking tables',
                     'Knowledge usage log enhancements',
-                    'Performance reports table'
+                    'Performance reports table',
+                    'Visual limits on subjects table'
                 ]
             }
             
@@ -1675,6 +1697,122 @@ class VercelMigrationManager:
                 'error': str(e)
             }
 
+    def apply_migration_016(self):
+        """
+        Apply migration 016: Add visual_json_max and visual_svg_max columns to subjects table.
+        
+        These columns control per-subject visual generation limits:
+        - visual_json_max: Max JSON-based visual questions per subject (frontend renders from params)
+        - visual_svg_max: Max AI-generated SVG questions per subject (backend sends complete SVG)
+        
+        Math/Maths subjects default to visual_json_max=3, visual_svg_max=1
+        Other subjects default to 0 until configured
+        """
+        try:
+            conn = self.db_provider._get_connection()
+            cursor = conn.cursor()
+            messages = []
+
+            # Create alembic_version table if it doesn't exist
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) PRIMARY KEY)
+            """)
+
+            # Add visual_json_max column
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.columns 
+                    WHERE table_name = 'subjects' AND column_name = 'visual_json_max'
+                )
+            """)
+            visual_json_max_exists = cursor.fetchone()[0]
+
+            if not visual_json_max_exists:
+                cursor.execute("""
+                    ALTER TABLE subjects ADD COLUMN visual_json_max INTEGER DEFAULT 0 NOT NULL
+                """)
+                messages.append("Added visual_json_max column to subjects table")
+                logger.info("Added visual_json_max column to subjects table")
+            else:
+                messages.append("visual_json_max column already exists")
+
+            # Add visual_svg_max column
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.columns 
+                    WHERE table_name = 'subjects' AND column_name = 'visual_svg_max'
+                )
+            """)
+            visual_svg_max_exists = cursor.fetchone()[0]
+
+            if not visual_svg_max_exists:
+                cursor.execute("""
+                    ALTER TABLE subjects ADD COLUMN visual_svg_max INTEGER DEFAULT 0 NOT NULL
+                """)
+                messages.append("Added visual_svg_max column to subjects table")
+                logger.info("Added visual_svg_max column to subjects table")
+            else:
+                messages.append("visual_svg_max column already exists")
+
+            # Update Math/Maths subjects with default visual limits
+            cursor.execute("""
+                UPDATE subjects 
+                SET visual_json_max = 3, visual_svg_max = 1 
+                WHERE LOWER(name) IN ('math', 'maths', 'mathematics')
+                  AND (visual_json_max = 0 OR visual_svg_max = 0)
+            """)
+            updated_rows = cursor.rowcount
+            if updated_rows > 0:
+                messages.append(f"Updated {updated_rows} Math/Maths subject(s) with visual limits")
+                logger.info(f"Updated {updated_rows} Math/Maths subject(s) with visual limits")
+
+            # Create index for subjects with visual capabilities enabled
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM pg_indexes
+                    WHERE tablename = 'subjects' AND indexname = 'idx_subjects_visual_enabled'
+                )
+            """)
+            index_exists = cursor.fetchone()[0]
+
+            if not index_exists:
+                cursor.execute("""
+                    CREATE INDEX idx_subjects_visual_enabled 
+                    ON subjects(visual_json_max, visual_svg_max) 
+                    WHERE visual_json_max > 0 OR visual_svg_max > 0
+                """)
+                messages.append("Created index idx_subjects_visual_enabled")
+                logger.info("Created index idx_subjects_visual_enabled on subjects table")
+            else:
+                messages.append("Index idx_subjects_visual_enabled already exists")
+
+            # Update migration version to 016
+            cursor.execute("""
+                DELETE FROM alembic_version WHERE version_num IN ('016', '015', '014', '013', '012', '011', '010', '009', '008', '007', '2d3eefae954c')
+            """)
+            cursor.execute("""
+                INSERT INTO alembic_version (version_num) VALUES ('016')
+                ON CONFLICT (version_num) DO NOTHING
+            """)
+            messages.append("Updated alembic version to 016")
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            return {
+                'success': True,
+                'message': '; '.join(messages) if messages else 'Migration 016 already applied'
+            }
+
+        except Exception as e:
+            logger.error(f"Error in migration 016: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
 
 # Global instance
 migration_manager = VercelMigrationManager()
+

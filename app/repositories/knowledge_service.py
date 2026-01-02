@@ -72,7 +72,8 @@ class KnowledgeService:
             # Note: grade_level filtering would require knowledge_documents join
             # For now, return all active subjects
             query = """
-                SELECT id, name, display_name, description, icon, color, is_active
+                SELECT id, name, display_name, description, icon, color, is_active,
+                       visual_json_max, visual_svg_max
                 FROM subjects
                 WHERE is_active = true
                 ORDER BY name
@@ -272,7 +273,8 @@ class KnowledgeService:
             
             cursor.execute(
                 """
-                SELECT id, name, display_name, description, icon, color, is_active
+                SELECT id, name, display_name, description, icon, color, is_active, 
+                       visual_json_max, visual_svg_max
                 FROM subjects 
                 WHERE id = %s AND is_active = true
                 """,
@@ -284,7 +286,8 @@ class KnowledgeService:
             conn.close()
             
             if row:
-                columns = ['id', 'name', 'display_name', 'description', 'icon', 'color', 'is_active']
+                columns = ['id', 'name', 'display_name', 'description', 'icon', 'color', 'is_active', 
+                           'visual_json_max', 'visual_svg_max']
                 return dict(zip(columns, row))
             return None
             

@@ -65,3 +65,15 @@ MAX_RETRIEVAL_RETRIES = int(os.getenv("MAX_RETRIEVAL_RETRIES", "2"))
 LANGSMITH_API_KEY = os.getenv('LANGSMITH_API_KEY', '')
 LANGSMITH_PROJECT = os.getenv('LANGSMITH_PROJECT', 'pr-internal-mesenchyme-70')
 LANGSMITH_TRACING = os.getenv('LANGSMITH_TRACING', 'false').lower() == 'true'
+
+# === Help Feature - Visual Aids Configuration ===
+# Controls global limits for visual aids in help responses
+# Subject-level limits in subjects table can be MORE restrictive
+
+# JSON-based visual aids (frontend renders SVG from shape parameters)
+FF_HELP_VISUAL_JSON_ENABLED = os.getenv("FF_HELP_VISUAL_JSON_ENABLED", "true").lower() == "true"
+FF_HELP_VISUAL_JSON_MAX = int(os.getenv("FF_HELP_VISUAL_JSON_MAX", "3"))
+
+# AI-generated SVG (complete SVG element from AI, experimental)
+FF_HELP_VISUAL_SVG_FROM_AI_ENABLED = os.getenv("FF_HELP_VISUAL_SVG_FROM_AI_ENABLED", "false").lower() == "true"
+FF_HELP_VISUAL_SVG_FROM_AI_MAX = int(os.getenv("FF_HELP_VISUAL_SVG_FROM_AI_MAX", "1"))

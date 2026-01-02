@@ -959,6 +959,72 @@ async def get_subject(subject_id: int):
         raise HTTPException(status_code=500, detail="Failed to fetch subject")
 
 
+@router.get("/subjects/{subject_id}/visual-limits")
+async def get_subject_visual_limits(subject_id: int):
+    """
+    Get visual aid limits for a specific subject.
+    
+    Returns subject-level visual configuration for help feature:
+    - visual_json_max: Max JSON-based visual aids allowed
+    - visual_svg_max: Max AI-generated SVG aids allowed
+    
+    These limits work together with global feature flags:
+    - Global flags (FF_HELP_VISUAL_*) override subject settings
+    - Subject limits can be MORE restrictive than global
+    - Final limit = min(global, subject) for each type
+    """
+    from app.repositories.knowledge_service import KnowledgeService
+    
+    try:
+        subject = KnowledgeService.get_subject_by_id(subject_id)
+        if not subject:
+            raise HTTPException(status_code=404, detail="Subject not found")
+        
+        # Extract visual limits (default to 0 if not set)
+        visual_json_max = subject.get('visual_json_max', 0)
+        visual_svg_max = subject.get('visual_svg_max', 0)
+        
+        return {
+            "subject_id": subject_id,
+            "subject_name": subject['display_name'],
+            "visual_json_max": visual_json_max,
+            "visual_svg_max": visual_svg_max
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching visual limits for subject {subject_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch visual limits")
+
+
+@router.get("/app/features/help")
+async def get_help_feature_flags():
+    """
+    Get global feature flags for help system.
+    
+    Returns:
+    - visual_json_enabled: Whether JSON-based visual aids are enabled globally
+    - visual_json_max: Global max JSON visual aids per help request
+    - visual_svg_enabled: Whether AI-generated SVG aids are enabled globally
+    - visual_svg_max: Global max SVG visual aids per help request
+    
+    Frontend should cache these flags and combine with subject-level limits.
+    """
+    from app.config import (
+        FF_HELP_VISUAL_JSON_ENABLED,
+        FF_HELP_VISUAL_JSON_MAX,
+        FF_HELP_VISUAL_SVG_FROM_AI_ENABLED,
+        FF_HELP_VISUAL_SVG_FROM_AI_MAX
+    )
+    
+    return {
+        "visual_json_enabled": FF_HELP_VISUAL_JSON_ENABLED,
+        "visual_json_max": FF_HELP_VISUAL_JSON_MAX,
+        "visual_svg_enabled": FF_HELP_VISUAL_SVG_FROM_AI_ENABLED,
+        "visual_svg_max": FF_HELP_VISUAL_SVG_FROM_AI_MAX
+    }
+
+
 @router.get("/subjects/{subject_id}/knowledge")
 async def get_subject_knowledge(
     subject_id: int,
@@ -1334,6 +1400,183 @@ async def evaluate_answers(request: dict):
     except Exception as e:
         logger.error(f"Error evaluating answers: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to evaluate answers: {str(e)}")
+
+
+@router.post("/generate-question-help")
+async def generate_question_help(request: dict):
+    """
+    Generate AI-powered step-by-step help for a knowledge question.
+    
+    Behavior:
+    - Before answering: Generates explanation for a SIMILAR question
+    - After answering: Generates explanation for the EXACT question
+    
+    Request body:
+    - uid: str (required) - Firebase User UID
+    - question: str (required) - The question text
+    - correct_answer: str (required) - Correct answer for context
+    - subject_id: int (required) - Subject ID
+    - subject_name: str (required) - Subject display name
+    - user_answer: str (optional) - User's answer (when has_answered=true)
+    - has_answered: bool (optional, default=false) - Whether user answered
+    - is_live: int (optional, default=1) - 1=live, 0=test
+    
+    Returns:
+    - help_steps: List[HelpStep] - Markdown-formatted explanation steps
+    - question_variant: str - The question being explained
+    - has_answered: bool - Echo of input flag
+    - visual_count: int - Number of JSON visual aids
+    - svg_count: int - Number of SVG aids
+    - credits_remaining: int - User's remaining credits
+    - daily_help_count: int - Today's help request count
+    
+    Rate Limits:
+    - Credits: All users must have credits > 0 (deducts 1 credit per request)
+    - Daily limit: Free/trial users limited to 2 help requests per day
+    - Premium users: Unlimited daily help (but still uses credits)
+    
+    HTTP Errors:
+    - 400: Missing required fields
+    - 403: No credits remaining or daily limit exceeded
+    - 404: Subject not found
+    - 500: AI generation failed
+    """
+    from app.repositories.db_service import get_user_by_uid
+    from app.repositories.knowledge_service import KnowledgeService
+    from app.services.prompt_service import PromptService
+    
+    # Extract and validate parameters
+    uid = request.get('uid')
+    question = request.get('question')
+    correct_answer = request.get('correct_answer')
+    subject_id = request.get('subject_id')
+    subject_name = request.get('subject_name')
+    user_answer = request.get('user_answer')
+    has_answered = request.get('has_answered', False)
+    is_live = request.get('is_live', 1)
+    
+    if not uid:
+        raise HTTPException(status_code=400, detail="uid is required")
+    if not question:
+        raise HTTPException(status_code=400, detail="question is required")
+    if not correct_answer:
+        raise HTTPException(status_code=400, detail="correct_answer is required")
+    if not subject_id:
+        raise HTTPException(status_code=400, detail="subject_id is required")
+    if not subject_name:
+        raise HTTPException(status_code=400, detail="subject_name is required")
+    
+    try:
+        # Verify subject exists
+        subject = KnowledgeService.get_subject_by_id(subject_id)
+        if not subject:
+            raise HTTPException(status_code=404, detail="Subject not found")
+        
+        # Get user data for subscription and credits
+        user = get_user_by_uid(uid)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        subscription = user.get('subscription', 0)
+        credits = user.get('credits', 0)
+        
+        # Initialize prompt service
+        prompt_service = PromptService()
+        
+        # Check if user can request help (credits + daily limit)
+        limit_check = prompt_service.can_request_help(
+            uid=uid,
+            subscription=subscription,
+            credits=credits,
+            max_daily_help=2  # Free/trial users limited to 2 per day
+        )
+        
+        if not limit_check['can_request']:
+            error_type = 'no_credits' if credits <= 0 else 'daily_limit_exceeded'
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": error_type,
+                    "message": limit_check['reason'],
+                    "current_count": limit_check['current_count'],
+                    "max_count": limit_check['max_count'],
+                    "is_premium": limit_check['is_premium'],
+                    "credits_remaining": credits
+                }
+            )
+        
+        # Generate help using AI
+        help_result = prompt_service.generate_question_help(
+            uid=uid,
+            question=question,
+            correct_answer=correct_answer,
+            subject_id=subject_id,
+            subject_name=subject_name,
+            user_answer=user_answer,
+            has_answered=has_answered
+        )
+        
+        # Extract model info from help result
+        ai_model = help_result.get("ai_model", "unknown")
+        response_time_ms = help_result.get("response_time_ms")
+        used_fallback = help_result.get("used_fallback", False)
+        
+        # Deduct 1 credit
+        deduction_success = prompt_service.deduct_user_credit(uid=uid, amount=1)
+        if not deduction_success:
+            logger.warning(f"Failed to deduct credit for uid={uid} after help generation")
+        
+        # Calculate new credits remaining
+        new_credits = max(0, credits - 1)
+        
+        # Log help request to knowledge_usage_log
+        try:
+            log_type = 'knowledge_answer_help' if has_answered else 'knowledge_question_help'
+            
+            KnowledgeService.log_knowledge_usage(
+                uid=uid,
+                subject_id=subject_id,
+                question_count=0,  # Not a question generation
+                request_text=f"Help request: {question[:100]}...",
+                response_text=f"Generated {len(help_result['help_steps'])} help steps",
+                model_name=ai_model,
+                prompt_tokens=None,  # Not tracked for help
+                completion_tokens=None,
+                total_tokens=None,
+                response_time_ms=response_time_ms,
+                status='success',
+                log_type=log_type,
+                is_live=is_live,
+                used_fallback=used_fallback
+            )
+        except Exception as log_error:
+            logger.warning(f"Failed to log help usage: {log_error}")
+        
+        # Get updated daily count
+        daily_count = prompt_service.get_daily_help_count(uid)
+        
+        return {
+            "message": "Help generated successfully",
+            "help_steps": help_result["help_steps"],
+            "question_variant": help_result["question_variant"],
+            "has_answered": help_result["has_answered"],
+            "visual_count": help_result["visual_count"],
+            "svg_count": help_result["svg_count"],
+            "credits_remaining": new_credits,
+            "daily_help_count": daily_count,
+            "subject": subject,
+            "ai_summary": {
+                "ai_model": ai_model,
+                "generation_time_ms": response_time_ms,
+                "used_fallback": used_fallback
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating question help: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate help: {str(e)}")
 
 
 @router.post("/admin/knowledge-documents")

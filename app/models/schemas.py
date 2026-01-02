@@ -125,6 +125,51 @@ class AnswerEvaluationResult(BaseModel):
 
 
 # ============================================================================
+# Question Help Schemas (Visual Aid Support)
+# ============================================================================
+
+class HelpStepVisual(BaseModel):
+    """Visual aid for a help step (follows visual-questions plan structure)"""
+    type: str  # 'rectangle', 'triangle', 'circle', 'square', 'fraction', 'number_line', 'clock', 'custom'
+    data: dict  # Template-specific params: { width, height, unit, radius, etc. }
+    svg: Optional[str] = None  # Only populated if AI-generated SVG enabled
+
+
+class HelpStep(BaseModel):
+    """A single step in the help explanation"""
+    step_number: int
+    title: str
+    content: str  # Markdown-formatted content
+    visual: Optional[HelpStepVisual] = None
+    emoji: Optional[str] = None  # 🎯, 💡, ✅, etc.
+
+
+class QuestionHelpRequest(BaseModel):
+    """Request body for generating question help"""
+    uid: str
+    subject_id: int
+    question: str
+    topic: str
+    difficulty: int
+    answer: str
+    is_pre_answer: bool  # True = help before answering, False = help after answering
+
+
+class QuestionHelpResponse(BaseModel):
+    """Response from help generation"""
+    help_steps: List[HelpStep]
+    similar_question: Optional[str] = None  # Only for pre-answer help
+    ai_model: str
+    tokens: int
+    response_time_ms: int
+    credits_remaining: int
+    daily_help_count: int
+    max_daily_help: int
+    visual_count: int  # Number of JSON-based visuals
+    svg_count: int  # Number of AI-generated SVGs
+
+
+# ============================================================================
 # Game Leaderboard Schemas
 # ============================================================================
 
