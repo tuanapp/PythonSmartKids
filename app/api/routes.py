@@ -1454,6 +1454,7 @@ async def generate_question_help(request: dict):
     user_answer = request.get('user_answer')
     has_answered = request.get('has_answered', False)
     is_live = request.get('is_live', 1)
+    visual_preference = request.get('visual_preference', 'text')  # 'text', 'json', or 'svg'
     
     if not uid:
         raise HTTPException(status_code=400, detail="uid is required")
@@ -1513,7 +1514,8 @@ async def generate_question_help(request: dict):
             subject_id=subject_id,
             subject_name=subject_name,
             user_answer=user_answer,
-            has_answered=has_answered
+            has_answered=has_answered,
+            visual_preference=visual_preference
         )
         
         # Extract model info from help result

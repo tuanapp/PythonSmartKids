@@ -599,7 +599,8 @@ class PromptService:
         subject_id: int,
         subject_name: str,
         user_answer: Optional[str] = None,
-        has_answered: bool = False
+        has_answered: bool = False,
+        visual_preference: str = 'text'
     ) -> Dict[str, Any]:
         """
         Generate AI-powered step-by-step help for a knowledge question.
@@ -612,6 +613,7 @@ class PromptService:
         1. Global feature flags in config.py (FF_HELP_VISUAL_*)
         2. Subject-level limits in subjects table (visual_json_max, visual_svg_max)
         3. Environment variables override subject settings
+        4. User preference (visual_preference parameter)
         
         Args:
             uid: Firebase User UID
@@ -621,6 +623,7 @@ class PromptService:
             subject_name: Subject name for prompt context
             user_answer: User's submitted answer (only when has_answered=True)
             has_answered: Whether user has already submitted an answer
+            visual_preference: 'text' (no visuals), 'json' (force JSON shapes), 'svg' (force AI SVG)
             
         Returns:
             Dictionary with:
@@ -671,19 +674,51 @@ class PromptService:
             final_json_max = min(effective_json_max, subject_json_max) if subject_json_max > 0 else effective_json_max
             final_svg_max = min(effective_svg_max, subject_svg_max) if subject_svg_max > 0 else effective_svg_max
             
-            logger.info(f"Help visual limits for subject {subject_name}: JSON={final_json_max}, SVG={final_svg_max}")
+            # Override based on user's visual preference
+            if visual_preference == 'text':
+                # User wants text only - disable all visuals
+                final_json_max = 0
+                final_svg_max = 0
+            elif visual_preference == 'json':
+                # User wants JSON shapes - force at least 1, disable SVG
+                final_json_max = max(final_json_max, 5)  # Ensure minimum 5 for multiple shapes
+                final_svg_max = 0
+            elif visual_preference == 'svg':
+                # User wants AI-generated SVG - force at least 1, disable JSON
+                final_json_max = 0
+                final_svg_max = max(final_svg_max, 2)  # Ensure minimum 2 SVGs
+            
+            logger.info(f"Help visual limits for subject {subject_name} (preference={visual_preference}): JSON={final_json_max}, SVG={final_svg_max}")
+            
+            # Determine if visuals are required or optional
+            visual_required = visual_preference in ['json', 'svg']
+            visual_requirement_text = "**REQUIRED**" if visual_required else "OPTIONAL - use sparingly when they genuinely help understanding"
             
             # Build visual instructions for AI
             visual_instructions = ""
             if final_json_max > 0 or final_svg_max > 0:
                 visual_instructions = f"""
-**Visual Aids** (OPTIONAL - use sparingly when they genuinely help understanding):
-You may include up to {final_json_max} JSON-based visual aids and {final_svg_max} AI-generated SVG aids across ALL steps.
+**Visual Aids** ({visual_requirement_text}):
+You {"MUST" if visual_required else "may"} include up to {final_json_max} JSON-based visual aids and {final_svg_max} AI-generated SVG aids across ALL steps.
+{"At least ONE visual aid is MANDATORY for this help request." if visual_required else ""}
 
 For JSON visuals (frontend renders these):
 - Shape primitives: {{\"type\": \"circle\", \"data\": {{\"radius\": 50, \"fill\": \"#4CAF50\", \"label\": \"Area\"}}}}
 - Available shapes: circle, rectangle, triangle, line, arrow, grid
 - Each shape supports: fill, stroke, strokeWidth, label, position (x, y)
+
+**IMPORTANT for quantities/ratios:**
+- To show "2 apples", create an ARRAY of 2 rectangle shapes, NOT one shape with label "2 Apples"
+- To show ratio 3:2, create 3 shapes + 2 shapes (5 total shapes in the array)
+- Each visual can contain MULTIPLE shapes as an array
+- Example for 2 items:
+  {{
+    "type": "json_shapes",  // Note: plural "shapes"
+    "data": [
+      {{\"type\": \"rectangle\", \"position\": {{\"x\": 50, \"y\": 50}}, \"width\": 40, \"height\": 40, \"fill\": \"#F44336\", \"label\": \"Apple 1\"}},
+      {{\"type\": \"rectangle\", \"position\": {{\"x\": 100, \"y\": 50}}, \"width\": 40, \"height\": 40, \"fill\": \"#F44336\", \"label\": \"Apple 2\"}}
+    ]
+  }}
 
 For AI-generated SVG (experimental, use ONLY if JSON shapes insufficient):
 - Provide complete <svg> element with viewBox, dimensions
@@ -691,10 +726,10 @@ For AI-generated SVG (experimental, use ONLY if JSON shapes insufficient):
 - Include descriptive title/aria-label
 
 **When to use visuals:**
-- Math: Geometry (shapes), fractions (pie charts), graphs
+- Math: Geometry (shapes), fractions (pie charts), ratios (multiple shapes), graphs
 - Science: Diagrams (atoms, cells, processes)
 - Geography: Maps, region highlights
-- NOT needed for: Pure text concepts, definitions, simple calculations
+- {"Use visuals for ANY concept that benefits from visual representation" if visual_required else "NOT needed for: Pure text concepts, definitions, simple calculations"}
 
 **Visual Response Format:**
 Add "visual" field to relevant steps:
@@ -702,8 +737,8 @@ Add "visual" field to relevant steps:
   "step_number": 2,
   "explanation": "markdown text...",
   "visual": {{
-    "type": "json_shape",  // or "svg_code"
-    "data": {{...}},        // JSON shape params
+    "type": "json_shapes",  // or "json_shape" (single), or "svg_code"
+    "data": [...],           // Array of shapes OR single shape object
     "svg": "<svg>...</svg>"  // or complete SVG string
   }}
 }}
