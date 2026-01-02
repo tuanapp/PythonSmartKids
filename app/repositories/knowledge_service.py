@@ -349,9 +349,9 @@ class KnowledgeService:
     @staticmethod
     def log_knowledge_usage(
         uid: str,
-        knowledge_doc_id: Optional[int],
         subject_id: int,
-        question_count: int,
+        knowledge_doc_id: Optional[int] = None,
+        question_count: int = 0,
         request_text: Optional[str] = None,
         response_text: Optional[str] = None,
         response_time_ms: Optional[int] = None,
@@ -363,7 +363,8 @@ class KnowledgeService:
         is_llm_only: Optional[bool] = None,
         level: Optional[int] = None,
         focus_weak_areas: Optional[bool] = None,
-        log_type: str = 'knowledge'
+        log_type: str = 'knowledge',
+        is_live: Optional[int] = None
     ):
         """
         Log knowledge document usage for analytics.
@@ -385,6 +386,7 @@ class KnowledgeService:
             level: Requested difficulty level (1-6)
             focus_weak_areas: Whether weak areas mode was enabled
             log_type: Type of log entry (defaults to 'knowledge')
+            is_live: 1 for live requests, 0 for test requests (optional)
         """
         try:
             conn = db_provider._get_connection()
@@ -395,12 +397,12 @@ class KnowledgeService:
                 INSERT INTO knowledge_usage_log 
                 (uid, knowledge_doc_id, subject_id, question_count, request_text, response_text, 
                  response_time_ms, model_name, used_fallback, failed_models, knowledge_document_ids,
-                 past_incorrect_attempts_count, is_llm_only, level, focus_weak_areas, log_type)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 past_incorrect_attempts_count, is_llm_only, level, focus_weak_areas, log_type, is_live)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (uid, knowledge_doc_id, subject_id, question_count, request_text, response_text,
                  response_time_ms, model_name, used_fallback, failed_models, knowledge_document_ids,
-                 past_incorrect_attempts_count, is_llm_only, level, focus_weak_areas, log_type)
+                 past_incorrect_attempts_count, is_llm_only, level, focus_weak_areas, log_type, is_live)
             )
             conn.commit()
             cursor.close()

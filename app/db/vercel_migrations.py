@@ -1523,6 +1523,7 @@ class VercelMigrationManager:
                 ("level", "INTEGER"),
                 ("focus_weak_areas", "BOOLEAN"),
                 ("log_type", "VARCHAR(50) DEFAULT 'knowledge'"),
+                ("is_live", "INTEGER DEFAULT 1"),
             ]
             
             # Check and add each column

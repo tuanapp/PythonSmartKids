@@ -872,7 +872,7 @@ Return ONLY the JSON object, no additional text.
                         
                         logger.info(f"Help generated successfully with {model_name} for uid={uid}, subject={subject_name}, visuals: JSON={visual_count}, SVG={svg_count}")
                         
-                        # Return successful result
+                        # Return successful result with full AI request/response for logging
                         return {
                             "help_steps": help_data["help_steps"],
                             "question_variant": help_data["question_variant"],
@@ -881,7 +881,9 @@ Return ONLY the JSON object, no additional text.
                             "svg_count": svg_count,
                             "ai_model": model_name,
                             "used_fallback": is_fallback_attempt,
-                            "response_time_ms": response_time_ms
+                            "response_time_ms": response_time_ms,
+                            "ai_request": prompt,  # Full prompt sent to AI
+                            "ai_response": response_text  # Full response from AI
                         }
                         
                     except json.JSONDecodeError as e:

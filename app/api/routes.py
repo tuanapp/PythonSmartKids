@@ -1535,16 +1535,13 @@ async def generate_question_help(request: dict):
             
             KnowledgeService.log_knowledge_usage(
                 uid=uid,
+                knowledge_doc_id=None,  # Help requests don't use knowledge documents
                 subject_id=subject_id,
                 question_count=0,  # Not a question generation
-                request_text=f"Help request: {question[:100]}...",
-                response_text=f"Generated {len(help_result['help_steps'])} help steps",
+                request_text=help_result.get('ai_request'),  # Full AI prompt
+                response_text=help_result.get('ai_response'),  # Full AI response
                 model_name=ai_model,
-                prompt_tokens=None,  # Not tracked for help
-                completion_tokens=None,
-                total_tokens=None,
                 response_time_ms=response_time_ms,
-                status='success',
                 log_type=log_type,
                 is_live=is_live,
                 used_fallback=used_fallback
