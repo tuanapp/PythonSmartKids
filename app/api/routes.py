@@ -1374,6 +1374,19 @@ async def evaluate_answers(request: dict):
                     topic=original.get('topic')
                 )
                 attempt_ids.append(attempt_id)
+                
+                # NEW: Update any pre-answer help records with this attempt_id
+                # This links help that was requested before submission to the saved attempt
+                if attempt_id:
+                    try:
+                        KnowledgeService.link_help_to_attempt(
+                            uid=uid,
+                            question=result.get('question', ''),
+                            attempt_id=attempt_id
+                        )
+                    except Exception as link_error:
+                        logger.warning(f"Failed to link help to attempt {attempt_id}: {link_error}")
+                
             except Exception as save_error:
                 logger.warning(f"Failed to save attempt: {save_error}")
                 attempt_ids.append(None)  # Keep array length consistent

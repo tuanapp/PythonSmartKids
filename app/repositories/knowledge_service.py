@@ -739,6 +739,53 @@ class KnowledgeService:
             raise
     
     @staticmethod
+    def link_help_to_attempt(
+        uid: str,
+        question: str,
+        attempt_id: int
+    ):
+        """
+        Link pre-answer help records to a saved attempt.
+        Updates knowledge_usage_log records that have NULL attempt_id
+        and match the user/question from the last 10 minutes.
+        
+        Args:
+            uid: Firebase User UID
+            question: Question text to match
+            attempt_id: ID of the saved attempt to link to
+        """
+        try:
+            conn = db_provider._get_connection()
+            cursor = conn.cursor()
+            
+            # Update help records from the last 10 minutes that match this question
+            # Only update records with NULL attempt_id (pre-answer help)
+            cursor.execute(
+                """
+                UPDATE knowledge_usage_log
+                SET attempt_id = %s
+                WHERE uid = %s
+                    AND attempt_id IS NULL
+                    AND log_type IN ('knowledge_question_help', 'knowledge_answer_help')
+                    AND request_text LIKE %s
+                    AND created_at >= NOW() - INTERVAL '10 minutes'
+                """,
+                (attempt_id, uid, f'%{question[:50]}%')  # Match first 50 chars of question
+            )
+            
+            updated_count = cursor.rowcount
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            if updated_count > 0:
+                logger.debug(f"Linked {updated_count} help record(s) to attempt {attempt_id}")
+            
+        except Exception as e:
+            logger.error(f"Error linking help to attempt: {e}")
+            # Don't raise - this is a non-critical operation
+    
+    @staticmethod
     def create_knowledge_document(
         subject_id: int,
         title: str,
