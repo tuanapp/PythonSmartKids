@@ -364,7 +364,8 @@ class KnowledgeService:
         level: Optional[int] = None,
         focus_weak_areas: Optional[bool] = None,
         log_type: str = 'knowledge',
-        is_live: Optional[int] = None
+        is_live: Optional[int] = None,
+        attempt_id: Optional[int] = None
     ):
         """
         Log knowledge document usage for analytics.
@@ -387,6 +388,7 @@ class KnowledgeService:
             focus_weak_areas: Whether weak areas mode was enabled
             log_type: Type of log entry (defaults to 'knowledge')
             is_live: 1 for live requests, 0 for test requests (optional)
+            attempt_id: ID of the knowledge attempt (for help requests) (optional)
         """
         try:
             conn = db_provider._get_connection()
@@ -397,18 +399,18 @@ class KnowledgeService:
                 INSERT INTO knowledge_usage_log 
                 (uid, knowledge_doc_id, subject_id, question_count, request_text, response_text, 
                  response_time_ms, model_name, used_fallback, failed_models, knowledge_document_ids,
-                 past_incorrect_attempts_count, is_llm_only, level, focus_weak_areas, log_type, is_live)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 past_incorrect_attempts_count, is_llm_only, level, focus_weak_areas, log_type, is_live, attempt_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (uid, knowledge_doc_id, subject_id, question_count, request_text, response_text,
                  response_time_ms, model_name, used_fallback, failed_models, knowledge_document_ids,
-                 past_incorrect_attempts_count, is_llm_only, level, focus_weak_areas, log_type, is_live)
+                 past_incorrect_attempts_count, is_llm_only, level, focus_weak_areas, log_type, is_live, attempt_id)
             )
             conn.commit()
             cursor.close()
             conn.close()
             
-            logger.debug(f"Logged knowledge usage for user {uid}")
+            logger.debug(f"Logged knowledge usage for user {uid}" + (f" (attempt {attempt_id})" if attempt_id else ""))
             
         except Exception as e:
             logger.error(f"Error logging knowledge usage: {e}")
@@ -428,7 +430,7 @@ class KnowledgeService:
         score: Optional[float] = None,
         difficulty_level: Optional[int] = None,
         topic: Optional[str] = None
-    ):
+    ) -> int:
         """
         Save a knowledge question attempt with evaluation results.
         
@@ -445,6 +447,9 @@ class KnowledgeService:
             score: Score from 0.0 to 1.0
             difficulty_level: Difficulty level (1-6)
             topic: Topic of the question
+            
+        Returns:
+            The ID of the newly created attempt
         """
         try:
             conn = db_provider._get_connection()
@@ -457,20 +462,25 @@ class KnowledgeService:
                  evaluation_status, ai_feedback, best_answer, improvement_tips, 
                  score, difficulty_level, topic)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
                 """,
                 (uid, subject_id, question, user_answer, correct_answer,
                  evaluation_status, ai_feedback, best_answer, improvement_tips,
                  score, difficulty_level, topic)
             )
+            
+            attempt_id = cursor.fetchone()[0]
             conn.commit()
             cursor.close()
             conn.close()
             
-            logger.debug(f"Saved knowledge attempt for user {uid}")
+            logger.debug(f"Saved knowledge attempt {attempt_id} for user {uid}")
             
             # TODO: evaluate & decide later
             # Invalidate performance report cache when new attempts are added
             # performance_report_service.invalidate_cache()
+            
+            return attempt_id
             
         except Exception as e:
             logger.error(f"Error saving knowledge attempt: {e}")
@@ -532,6 +542,200 @@ class KnowledgeService:
             
         except Exception as e:
             logger.error(f"Error fetching knowledge attempts: {e}")
+            raise
+    
+    @staticmethod
+    def get_user_attempt_sessions(
+        uid: str,
+        subject_id: Optional[int] = None,
+        limit: int = 50
+    ) -> List[dict]:
+        """
+        Get a list of unique quiz sessions (grouped by timestamp).
+        Sessions are attempts that occurred within ±10 seconds of each other.
+        
+        Args:
+            uid: Firebase User UID
+            subject_id: Optional subject ID to filter
+            limit: Maximum number of sessions to return
+            
+        Returns:
+            List of session dictionaries with metadata
+        """
+        try:
+            conn = db_provider._get_connection()
+            cursor = conn.cursor()
+            
+            # Query to get representative timestamps and session stats
+            query = """
+                WITH session_groups AS (
+                    SELECT 
+                        MIN(id) as session_id,
+                        subject_id,
+                        MIN(created_at) as session_timestamp,
+                        COUNT(*) as total_questions,
+                        SUM(CASE WHEN evaluation_status = 'correct' THEN 1 ELSE 0 END) as correct_count,
+                        SUM(CASE WHEN evaluation_status = 'partial' THEN 1 ELSE 0 END) as partial_count,
+                        SUM(CASE WHEN evaluation_status = 'incorrect' THEN 1 ELSE 0 END) as incorrect_count,
+                        AVG(score) as average_score
+                    FROM knowledge_question_attempts
+                    WHERE uid = %s
+            """
+            params = [uid]
+            
+            if subject_id:
+                query += " AND subject_id = %s"
+                params.append(subject_id)
+            
+            query += """
+                    GROUP BY subject_id, DATE_TRUNC('minute', created_at)
+                    ORDER BY session_timestamp DESC
+                    LIMIT %s
+                )
+                SELECT 
+                    sg.*,
+                    s.name as subject_name,
+                    s.display_name as subject_display_name,
+                    s.icon as subject_icon,
+                    s.color as subject_color
+                FROM session_groups sg
+                LEFT JOIN subjects s ON sg.subject_id = s.id
+            """
+            params.append(limit)
+            
+            cursor.execute(query, tuple(params))
+            
+            columns = [desc[0] for desc in cursor.description]
+            results = []
+            for row in cursor.fetchall():
+                results.append(dict(zip(columns, row)))
+            
+            cursor.close()
+            conn.close()
+            
+            logger.debug(f"Retrieved {len(results)} sessions for user {uid}")
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error fetching attempt sessions: {e}")
+            raise
+    
+    @staticmethod
+    def get_attempt_by_id(attempt_id: int, uid: str) -> Optional[dict]:
+        """
+        Get a single attempt by ID with linked help data.
+        
+        Args:
+            attempt_id: ID of the attempt
+            uid: Firebase User UID (for security)
+            
+        Returns:
+            Attempt dictionary with help data, or None if not found
+        """
+        try:
+            conn = db_provider._get_connection()
+            cursor = conn.cursor()
+            
+            # Query attempt with LEFT JOIN to get help data if exists
+            cursor.execute(
+                """
+                SELECT 
+                    a.id, a.uid, a.subject_id, a.question, a.user_answer, a.correct_answer,
+                    a.evaluation_status, a.ai_feedback, a.best_answer, a.improvement_tips,
+                    a.score, a.difficulty_level, a.topic, a.created_at,
+                    ul.response_text as help_response,
+                    ul.request_text as help_request,
+                    ul.model_name as help_model,
+                    ul.response_time_ms as help_generation_time
+                FROM knowledge_question_attempts a
+                LEFT JOIN knowledge_usage_log ul ON a.id = ul.attempt_id 
+                    AND ul.log_type IN ('knowledge_question_help', 'knowledge_answer_help')
+                WHERE a.id = %s AND a.uid = %s
+                LIMIT 1
+                """,
+                (attempt_id, uid)
+            )
+            
+            row = cursor.fetchone()
+            if not row:
+                cursor.close()
+                conn.close()
+                return None
+            
+            columns = [desc[0] for desc in cursor.description]
+            result = dict(zip(columns, row))
+            
+            cursor.close()
+            conn.close()
+            
+            logger.debug(f"Retrieved attempt {attempt_id} for user {uid}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error fetching attempt by ID: {e}")
+            raise
+    
+    @staticmethod
+    def get_attempts_by_session(
+        uid: str,
+        session_timestamp: str,
+        subject_id: Optional[int] = None
+    ) -> List[dict]:
+        """
+        Get all attempts from a specific session (within ±10 seconds of timestamp).
+        
+        Args:
+            uid: Firebase User UID
+            session_timestamp: ISO timestamp of the session
+            subject_id: Optional subject ID to filter
+            
+        Returns:
+            List of attempt dictionaries with help data
+        """
+        try:
+            conn = db_provider._get_connection()
+            cursor = conn.cursor()
+            
+            # Build query to get attempts within time window
+            query = """
+                SELECT 
+                    a.id, a.uid, a.subject_id, a.question, a.user_answer, a.correct_answer,
+                    a.evaluation_status, a.ai_feedback, a.best_answer, a.improvement_tips,
+                    a.score, a.difficulty_level, a.topic, a.created_at,
+                    ul.response_text as help_response,
+                    ul.request_text as help_request,
+                    ul.model_name as help_model,
+                    ul.response_time_ms as help_generation_time
+                FROM knowledge_question_attempts a
+                LEFT JOIN knowledge_usage_log ul ON a.id = ul.attempt_id 
+                    AND ul.log_type IN ('knowledge_question_help', 'knowledge_answer_help')
+                WHERE a.uid = %s
+                    AND a.created_at BETWEEN (%s::timestamp - INTERVAL '10 seconds') 
+                                         AND (%s::timestamp + INTERVAL '10 seconds')
+            """
+            params = [uid, session_timestamp, session_timestamp]
+            
+            if subject_id:
+                query += " AND a.subject_id = %s"
+                params.append(subject_id)
+            
+            query += " ORDER BY a.created_at ASC"
+            
+            cursor.execute(query, tuple(params))
+            
+            columns = [desc[0] for desc in cursor.description]
+            results = []
+            for row in cursor.fetchall():
+                results.append(dict(zip(columns, row)))
+            
+            cursor.close()
+            conn.close()
+            
+            logger.debug(f"Retrieved {len(results)} attempts for session {session_timestamp}")
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error fetching session attempts: {e}")
             raise
     
     @staticmethod

@@ -372,6 +372,10 @@ class VercelMigrationManager:
             visual_limits_result = self.apply_migration_016()
             logger.info(f"Visual limits migration result: {visual_limits_result['message']}")
             
+            # Add attempt_id to knowledge_usage_log table
+            attempt_id_result = self.apply_migration_017()
+            logger.info(f"Attempt ID migration result: {attempt_id_result['message']}")
+            
             # Verify the migration was successful
             status = self.check_migration_status()
             
@@ -398,7 +402,8 @@ class VercelMigrationManager:
                     'Model ID references on tracking tables',
                     'Knowledge usage log enhancements',
                     'Performance reports table',
-                    'Visual limits on subjects table'
+                    'Visual limits on subjects table',
+                    'Attempt ID in knowledge usage log'
                 ]
             }
             
@@ -1808,6 +1813,82 @@ class VercelMigrationManager:
 
         except Exception as e:
             logger.error(f"Error in migration 016: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def apply_migration_017(self) -> Dict[str, Any]:
+        """
+        Apply migration 017: Add attempt_id to knowledge_usage_log table.
+        
+        Links help requests to specific knowledge question attempts for historical review.
+        """
+        try:
+            conn = self.db_provider._get_connection()
+            cursor = conn.cursor()
+            messages = []
+            
+            # Check if attempt_id column exists on knowledge_usage_log table
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.columns 
+                    WHERE table_name = 'knowledge_usage_log' AND column_name = 'attempt_id'
+                )
+            """)
+            attempt_id_exists = cursor.fetchone()[0]
+            
+            if not attempt_id_exists:
+                # Add attempt_id column as nullable foreign key
+                cursor.execute("""
+                    ALTER TABLE knowledge_usage_log 
+                    ADD COLUMN attempt_id INTEGER
+                """)
+                messages.append("Added attempt_id column to knowledge_usage_log table")
+                logger.info("Added attempt_id column to knowledge_usage_log table")
+                
+                # Add foreign key constraint
+                cursor.execute("""
+                    ALTER TABLE knowledge_usage_log 
+                    ADD CONSTRAINT fk_knowledge_usage_log_attempt_id 
+                    FOREIGN KEY (attempt_id) 
+                    REFERENCES knowledge_question_attempts(id) 
+                    ON DELETE SET NULL
+                """)
+                messages.append("Added foreign key constraint for attempt_id")
+                logger.info("Added foreign key constraint for attempt_id")
+                
+                # Add index for efficient queries
+                cursor.execute("""
+                    CREATE INDEX idx_usage_log_attempt_id 
+                    ON knowledge_usage_log(attempt_id)
+                """)
+                messages.append("Created index idx_usage_log_attempt_id")
+                logger.info("Created index idx_usage_log_attempt_id on knowledge_usage_log table")
+            else:
+                messages.append("attempt_id column already exists on knowledge_usage_log table")
+            
+            # Update migration version to 017
+            cursor.execute("""
+                DELETE FROM alembic_version WHERE version_num IN ('017', '016', '015', '014', '013', '012', '011', '010', '009', '008', '007', '2d3eefae954c')
+            """)
+            cursor.execute("""
+                INSERT INTO alembic_version (version_num) VALUES ('017')
+                ON CONFLICT (version_num) DO NOTHING
+            """)
+            messages.append("Updated alembic version to 017")
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            return {
+                'success': True,
+                'message': '; '.join(messages) if messages else 'Migration 017 already applied'
+            }
+        
+        except Exception as e:
+            logger.error(f"Error in migration 017: {e}")
             return {
                 'success': False,
                 'error': str(e)

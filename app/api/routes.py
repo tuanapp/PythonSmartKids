@@ -1352,13 +1352,14 @@ async def evaluate_answers(request: dict):
         results = ai_result.get('evaluations', [])
         ai_summary = ai_result.get('ai_summary', {})
         
-        # Save attempts to database
+        # Save attempts to database and collect attempt IDs
+        attempt_ids = []
         for i, result in enumerate(results):
             try:
                 # Get additional info from original evaluation request
                 original = evaluations[i] if i < len(evaluations) else {}
                 
-                KnowledgeService.save_knowledge_attempt(
+                attempt_id = KnowledgeService.save_knowledge_attempt(
                     uid=uid,
                     subject_id=subject_id,
                     question=result.get('question', ''),
@@ -1372,8 +1373,10 @@ async def evaluate_answers(request: dict):
                     difficulty_level=original.get('difficulty'),
                     topic=original.get('topic')
                 )
+                attempt_ids.append(attempt_id)
             except Exception as save_error:
                 logger.warning(f"Failed to save attempt: {save_error}")
+                attempt_ids.append(None)  # Keep array length consistent
         
         # Calculate summary stats
         correct_count = sum(1 for r in results if r.get('status') == 'correct')
@@ -1384,6 +1387,7 @@ async def evaluate_answers(request: dict):
         return {
             "message": "Answers evaluated successfully",
             "evaluations": results,
+            "attempt_ids": attempt_ids,  # NEW: Return attempt IDs for frontend
             "summary": {
                 "total": len(results),
                 "correct": correct_count,
@@ -1455,6 +1459,7 @@ async def generate_question_help(request: dict):
     has_answered = request.get('has_answered', False)
     is_live = request.get('is_live', 1)
     visual_preference = request.get('visual_preference', 'text')  # 'text', 'json', or 'svg'
+    attempt_id = request.get('attempt_id')  # Optional: ID of the attempt this help is for
     
     if not uid:
         raise HTTPException(status_code=400, detail="uid is required")
@@ -1546,7 +1551,8 @@ async def generate_question_help(request: dict):
                 response_time_ms=response_time_ms,
                 log_type=log_type,
                 is_live=is_live,
-                used_fallback=used_fallback
+                used_fallback=used_fallback,
+                attempt_id=attempt_id  # Link help to specific attempt
             )
         except Exception as log_error:
             logger.warning(f"Failed to log help usage: {log_error}")
@@ -1576,6 +1582,155 @@ async def generate_question_help(request: dict):
     except Exception as e:
         logger.error(f"Error generating question help: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate help: {str(e)}")
+
+
+@router.get("/knowledge/sessions")
+async def get_knowledge_sessions(
+    uid: str,
+    subject_id: int = None,
+    limit: int = 50
+):
+    """
+    Get a list of unique knowledge quiz sessions for a user.
+    Sessions are grouped by timestamp (within ±10 seconds).
+    
+    Query parameters:
+    - uid: str (required) - Firebase User UID
+    - subject_id: int (optional) - Filter by subject
+    - limit: int (optional, default=50) - Max sessions to return
+    
+    Returns:
+    - sessions: List of session metadata objects with:
+        - session_id: int - Representative ID
+        - session_timestamp: datetime - Session start time
+        - subject_id: int
+        - subject_name: str
+        - subject_display_name: str
+        - subject_icon: str
+        - subject_color: str
+        - total_questions: int
+        - correct_count: int
+        - partial_count: int
+        - incorrect_count: int
+        - average_score: float
+    """
+    from app.repositories.knowledge_service import KnowledgeService
+    
+    if not uid:
+        raise HTTPException(status_code=400, detail="uid is required")
+    
+    try:
+        sessions = KnowledgeService.get_user_attempt_sessions(
+            uid=uid,
+            subject_id=subject_id,
+            limit=limit
+        )
+        
+        return {
+            "message": "Sessions retrieved successfully",
+            "sessions": sessions
+        }
+        
+    except Exception as e:
+        logger.error(f"Error retrieving knowledge sessions: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve sessions: {str(e)}")
+
+
+@router.get("/knowledge/attempts")
+async def get_knowledge_attempts(
+    uid: str,
+    session_timestamp: str = None,
+    subject_id: int = None
+):
+    """
+    Get knowledge quiz attempts for a user.
+    Can retrieve attempts from a specific session (timestamp) or all attempts.
+    
+    Query parameters:
+    - uid: str (required) - Firebase User UID
+    - session_timestamp: str (optional) - ISO timestamp to get specific session
+    - subject_id: int (optional) - Filter by subject
+    
+    Returns:
+    - attempts: List of attempt objects with help data included
+    """
+    from app.repositories.knowledge_service import KnowledgeService
+    
+    if not uid:
+        raise HTTPException(status_code=400, detail="uid is required")
+    
+    try:
+        if session_timestamp:
+            # Get specific session attempts
+            attempts = KnowledgeService.get_attempts_by_session(
+                uid=uid,
+                session_timestamp=session_timestamp,
+                subject_id=subject_id
+            )
+        else:
+            # Get all attempts (legacy method, limited to 20)
+            attempts = KnowledgeService.get_user_knowledge_attempts(
+                uid=uid,
+                subject_id=subject_id,
+                limit=20
+            )
+        
+        return {
+            "message": "Attempts retrieved successfully",
+            "attempts": attempts
+        }
+        
+    except Exception as e:
+        logger.error(f"Error retrieving knowledge attempts: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve attempts: {str(e)}")
+
+
+@router.get("/knowledge/attempts/{attempt_id}")
+async def get_knowledge_attempt(
+    attempt_id: int,
+    uid: str
+):
+    """
+    Get a single knowledge attempt by ID with help data.
+    
+    Path parameters:
+    - attempt_id: int - ID of the attempt
+    
+    Query parameters:
+    - uid: str (required) - Firebase User UID (for security)
+    
+    Returns:
+    - attempt: Full attempt object with:
+        - All attempt fields (question, answers, evaluation, etc.)
+        - help_response: str - Saved help response JSON
+        - help_request: str - Help request prompt
+        - help_model: str - AI model used for help
+        - help_generation_time: int - Help generation time in ms
+    """
+    from app.repositories.knowledge_service import KnowledgeService
+    
+    if not uid:
+        raise HTTPException(status_code=400, detail="uid is required")
+    
+    try:
+        attempt = KnowledgeService.get_attempt_by_id(
+            attempt_id=attempt_id,
+            uid=uid
+        )
+        
+        if not attempt:
+            raise HTTPException(status_code=404, detail="Attempt not found")
+        
+        return {
+            "message": "Attempt retrieved successfully",
+            "attempt": attempt
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving attempt {attempt_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve attempt: {str(e)}")
 
 
 @router.post("/admin/knowledge-documents")
