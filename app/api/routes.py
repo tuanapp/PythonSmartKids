@@ -1359,7 +1359,7 @@ async def evaluate_answers(request: dict):
                 # Get additional info from original evaluation request
                 original = evaluations[i] if i < len(evaluations) else {}
                 
-                attempt_id = KnowledgeService.save_knowledge_attempt(
+                attempt_id, created_at = KnowledgeService.save_knowledge_attempt(
                     uid=uid,
                     subject_id=subject_id,
                     question=result.get('question', ''),
@@ -1382,7 +1382,9 @@ async def evaluate_answers(request: dict):
                         KnowledgeService.link_help_to_attempt(
                             uid=uid,
                             question=result.get('question', ''),
-                            attempt_id=attempt_id
+                            attempt_id=attempt_id,
+                            subject_id=subject_id,
+                            created_at=str(created_at)
                         )
                     except Exception as link_error:
                         logger.warning(f"Failed to link help to attempt {attempt_id}: {link_error}")

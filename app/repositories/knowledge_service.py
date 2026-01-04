@@ -462,14 +462,16 @@ class KnowledgeService:
                  evaluation_status, ai_feedback, best_answer, improvement_tips, 
                  score, difficulty_level, topic)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
+                RETURNING id, created_at
                 """,
                 (uid, subject_id, question, user_answer, correct_answer,
                  evaluation_status, ai_feedback, best_answer, improvement_tips,
                  score, difficulty_level, topic)
             )
             
-            attempt_id = cursor.fetchone()[0]
+            result = cursor.fetchone()
+            attempt_id = result[0]
+            created_at = result[1]
             conn.commit()
             cursor.close()
             conn.close()
@@ -480,7 +482,7 @@ class KnowledgeService:
             # Invalidate performance report cache when new attempts are added
             # performance_report_service.invalidate_cache()
             
-            return attempt_id
+            return attempt_id, created_at
             
         except Exception as e:
             logger.error(f"Error saving knowledge attempt: {e}")
@@ -742,35 +744,46 @@ class KnowledgeService:
     def link_help_to_attempt(
         uid: str,
         question: str,
-        attempt_id: int
+        attempt_id: int,
+        subject_id: int,
+        created_at: str
     ):
         """
         Link pre-answer help records to a saved attempt.
         Updates knowledge_usage_log records that have NULL attempt_id
-        and match the user/question from the last 10 minutes.
+        and were created shortly before this attempt (same session).
         
         Args:
             uid: Firebase User UID
-            question: Question text to match
+            question: Question text (for logging purposes)
             attempt_id: ID of the saved attempt to link to
+            subject_id: Subject ID to match
+            created_at: Timestamp when the attempt was created (ISO format)
         """
         try:
             conn = db_provider._get_connection()
             cursor = conn.cursor()
             
-            # Update help records from the last 10 minutes that match this question
-            # Only update records with NULL attempt_id (pre-answer help)
+            # Find the most recent help record for this user/subject that hasn't been linked yet
+            # Look back up to 15 minutes before the attempt was created
+            # This assumes help was requested during the quiz, before submission
             cursor.execute(
                 """
                 UPDATE knowledge_usage_log
                 SET attempt_id = %s
-                WHERE uid = %s
-                    AND attempt_id IS NULL
-                    AND log_type IN ('knowledge_question_help', 'knowledge_answer_help')
-                    AND request_text LIKE %s
-                    AND created_at >= NOW() - INTERVAL '10 minutes'
+                WHERE id IN (
+                    SELECT id FROM knowledge_usage_log
+                    WHERE uid = %s
+                        AND subject_id = %s
+                        AND attempt_id IS NULL
+                        AND log_type IN ('knowledge_question_help', 'knowledge_answer_help')
+                        AND created_at <= %s
+                        AND created_at >= (%s::timestamp - INTERVAL '15 minutes')
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                )
                 """,
-                (attempt_id, uid, f'%{question[:50]}%')  # Match first 50 chars of question
+                (attempt_id, uid, subject_id, created_at, created_at)
             )
             
             updated_count = cursor.rowcount
@@ -780,6 +793,8 @@ class KnowledgeService:
             
             if updated_count > 0:
                 logger.debug(f"Linked {updated_count} help record(s) to attempt {attempt_id}")
+            else:
+                logger.debug(f"No pre-answer help found to link to attempt {attempt_id}")
             
         except Exception as e:
             logger.error(f"Error linking help to attempt: {e}")
