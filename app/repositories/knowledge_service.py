@@ -365,7 +365,9 @@ class KnowledgeService:
         focus_weak_areas: Optional[bool] = None,
         log_type: str = 'knowledge',
         is_live: Optional[int] = None,
-        attempt_id: Optional[int] = None
+        attempt_id: Optional[int] = None,
+        quiz_session_id: Optional[str] = None,
+        question_number: Optional[int] = None
     ):
         """
         Log knowledge document usage for analytics.
@@ -389,6 +391,8 @@ class KnowledgeService:
             log_type: Type of log entry (defaults to 'knowledge')
             is_live: 1 for live requests, 0 for test requests (optional)
             attempt_id: ID of the knowledge attempt (for help requests) (optional)
+            quiz_session_id: Unique session ID for grouping quiz activities (optional)
+            question_number: Question number in quiz (1-based) for help requests (optional)
         """
         try:
             conn = db_provider._get_connection()
@@ -399,18 +403,18 @@ class KnowledgeService:
                 INSERT INTO knowledge_usage_log 
                 (uid, knowledge_doc_id, subject_id, question_count, request_text, response_text, 
                  response_time_ms, model_name, used_fallback, failed_models, knowledge_document_ids,
-                 past_incorrect_attempts_count, is_llm_only, level, focus_weak_areas, log_type, is_live, attempt_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 past_incorrect_attempts_count, is_llm_only, level, focus_weak_areas, log_type, is_live, attempt_id, quiz_session_id, question_number)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (uid, knowledge_doc_id, subject_id, question_count, request_text, response_text,
                  response_time_ms, model_name, used_fallback, failed_models, knowledge_document_ids,
-                 past_incorrect_attempts_count, is_llm_only, level, focus_weak_areas, log_type, is_live, attempt_id)
+                 past_incorrect_attempts_count, is_llm_only, level, focus_weak_areas, log_type, is_live, attempt_id, quiz_session_id, question_number)
             )
             conn.commit()
             cursor.close()
             conn.close()
             
-            logger.debug(f"Logged knowledge usage for user {uid}" + (f" (attempt {attempt_id})" if attempt_id else ""))
+            logger.debug(f"Logged knowledge usage for user {uid}" + (f" (session {quiz_session_id})" if quiz_session_id else ""))
             
         except Exception as e:
             logger.error(f"Error logging knowledge usage: {e}")
@@ -429,7 +433,8 @@ class KnowledgeService:
         improvement_tips: Optional[str] = None,
         score: Optional[float] = None,
         difficulty_level: Optional[int] = None,
-        topic: Optional[str] = None
+        topic: Optional[str] = None,
+        quiz_session_id: Optional[str] = None
     ) -> int:
         """
         Save a knowledge question attempt with evaluation results.
@@ -447,6 +452,7 @@ class KnowledgeService:
             score: Score from 0.0 to 1.0
             difficulty_level: Difficulty level (1-6)
             topic: Topic of the question
+            quiz_session_id: Optional session ID for grouping
             
         Returns:
             The ID of the newly created attempt
@@ -460,13 +466,13 @@ class KnowledgeService:
                 INSERT INTO knowledge_question_attempts 
                 (uid, subject_id, question, user_answer, correct_answer, 
                  evaluation_status, ai_feedback, best_answer, improvement_tips, 
-                 score, difficulty_level, topic)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 score, difficulty_level, topic, quiz_session_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id, created_at
                 """,
                 (uid, subject_id, question, user_answer, correct_answer,
                  evaluation_status, ai_feedback, best_answer, improvement_tips,
-                 score, difficulty_level, topic)
+                 score, difficulty_level, topic, quiz_session_id)
             )
             
             result = cursor.fetchone()
@@ -568,12 +574,29 @@ class KnowledgeService:
             conn = db_provider._get_connection()
             cursor = conn.cursor()
             
-            # Query to get representative timestamps and session stats
+            # Check if quiz_session_id column exists
+            cursor.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'knowledge_question_attempts' 
+                AND column_name = 'quiz_session_id'
+            """)
+            has_quiz_session_id = cursor.fetchone() is not None
+            
+            if not has_quiz_session_id:
+                # Column doesn't exist - return empty list (no sessions to show)
+                logger.warning(f"quiz_session_id column not found - returning empty sessions list")
+                cursor.close()
+                conn.close()
+                return []
+            
+            # Query only sessions with valid quiz_session_id (ignore old records)
             query = """
                 WITH session_groups AS (
                     SELECT 
                         MIN(id) as session_id,
                         subject_id,
+                        quiz_session_id,
                         MIN(created_at) as session_timestamp,
                         COUNT(*) as total_questions,
                         SUM(CASE WHEN evaluation_status = 'correct' THEN 1 ELSE 0 END) as correct_count,
@@ -581,7 +604,7 @@ class KnowledgeService:
                         SUM(CASE WHEN evaluation_status = 'incorrect' THEN 1 ELSE 0 END) as incorrect_count,
                         AVG(score) as average_score
                     FROM knowledge_question_attempts
-                    WHERE uid = %s
+                    WHERE uid = %s AND quiz_session_id IS NOT NULL
             """
             params = [uid]
             
@@ -590,7 +613,7 @@ class KnowledgeService:
                 params.append(subject_id)
             
             query += """
-                    GROUP BY subject_id, DATE_TRUNC('minute', created_at)
+                    GROUP BY subject_id, quiz_session_id
                     ORDER BY session_timestamp DESC
                     LIMIT %s
                 )
@@ -615,7 +638,7 @@ class KnowledgeService:
             cursor.close()
             conn.close()
             
-            logger.debug(f"Retrieved {len(results)} sessions for user {uid}")
+            logger.debug(f"Retrieved {len(results)} sessions for user {uid} (only showing sessions with valid quiz_session_id)")
             return results
             
         except Exception as e:
@@ -680,15 +703,15 @@ class KnowledgeService:
     @staticmethod
     def get_attempts_by_session(
         uid: str,
-        session_timestamp: str,
+        quiz_session_id: str,
         subject_id: Optional[int] = None
     ) -> List[dict]:
         """
-        Get all attempts from a specific session (within ±10 seconds of timestamp).
+        Get all attempts from a specific session.
         
         Args:
             uid: Firebase User UID
-            session_timestamp: ISO timestamp of the session
+            quiz_session_id: Session ID
             subject_id: Optional subject ID to filter
             
         Returns:
@@ -698,7 +721,23 @@ class KnowledgeService:
             conn = db_provider._get_connection()
             cursor = conn.cursor()
             
-            # Build query to get attempts within time window
+            # Check if quiz_session_id column exists in attempts table
+            cursor.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'knowledge_question_attempts' 
+                AND column_name = 'quiz_session_id'
+            """)
+            has_quiz_session_id = cursor.fetchone() is not None
+            
+            if not has_quiz_session_id:
+                # Column doesn't exist - return empty list
+                logger.warning(f"quiz_session_id column not found in knowledge_question_attempts table")
+                cursor.close()
+                conn.close()
+                return []
+            
+            # Query attempts by exact quiz_session_id match (only for valid UUIDs)
             query = """
                 SELECT 
                     a.id, a.uid, a.subject_id, a.question, a.user_answer, a.correct_answer,
@@ -712,10 +751,9 @@ class KnowledgeService:
                 LEFT JOIN knowledge_usage_log ul ON a.id = ul.attempt_id 
                     AND ul.log_type IN ('knowledge_question_help', 'knowledge_answer_help')
                 WHERE a.uid = %s
-                    AND a.created_at BETWEEN (%s::timestamp - INTERVAL '10 seconds') 
-                                         AND (%s::timestamp + INTERVAL '10 seconds')
+                    AND a.quiz_session_id = %s
             """
-            params = [uid, session_timestamp, session_timestamp]
+            params = [uid, quiz_session_id]
             
             if subject_id:
                 query += " AND a.subject_id = %s"
@@ -733,7 +771,7 @@ class KnowledgeService:
             cursor.close()
             conn.close()
             
-            logger.debug(f"Retrieved {len(results)} attempts for session {session_timestamp}")
+            logger.debug(f"Retrieved {len(results)} attempts for session {quiz_session_id}")
             return results
             
         except Exception as e:
@@ -741,63 +779,67 @@ class KnowledgeService:
             raise
     
     @staticmethod
-    def link_help_to_attempt(
-        uid: str,
-        question: str,
-        attempt_id: int,
-        subject_id: int,
-        created_at: str
+    def link_help_records_by_session(
+        quiz_session_id: str,
+        attempt_ids: list,
+        questions: list
     ):
         """
-        Link pre-answer help records to a saved attempt.
-        Updates knowledge_usage_log records that have NULL attempt_id
-        and were created shortly before this attempt (same session).
+        Link pre-answer help records to saved attempts using quiz_session_id.
+        Matches help records to attempts based on the question text.
         
         Args:
-            uid: Firebase User UID
-            question: Question text (for logging purposes)
-            attempt_id: ID of the saved attempt to link to
-            subject_id: Subject ID to match
-            created_at: Timestamp when the attempt was created (ISO format)
+            quiz_session_id: Unique session ID for this quiz
+            attempt_ids: List of (attempt_id, question) tuples
+            questions: List of question texts corresponding to attempt_ids
         """
+        if not quiz_session_id:
+            logger.debug("No quiz_session_id provided, skipping help linking")
+            return
+            
         try:
             conn = db_provider._get_connection()
             cursor = conn.cursor()
             
-            # Find the most recent help record for this user/subject that hasn't been linked yet
-            # Look back up to 15 minutes before the attempt was created
-            # This assumes help was requested during the quiz, before submission
+            # Get all help records for this session that haven't been linked yet
             cursor.execute(
                 """
-                UPDATE knowledge_usage_log
-                SET attempt_id = %s
-                WHERE id IN (
-                    SELECT id FROM knowledge_usage_log
-                    WHERE uid = %s
-                        AND subject_id = %s
-                        AND attempt_id IS NULL
-                        AND log_type IN ('knowledge_question_help', 'knowledge_answer_help')
-                        AND created_at <= %s
-                        AND created_at >= (%s::timestamp - INTERVAL '15 minutes')
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                )
+                SELECT id, request_text FROM knowledge_usage_log
+                WHERE quiz_session_id = %s
+                    AND attempt_id IS NULL
+                    AND log_type IN ('knowledge_question_help', 'knowledge_answer_help')
                 """,
-                (attempt_id, uid, subject_id, created_at, created_at)
+                (quiz_session_id,)
             )
             
-            updated_count = cursor.rowcount
+            help_records = cursor.fetchall()
+            
+            if not help_records:
+                logger.debug(f"No unlinked help records found for session {quiz_session_id}")
+                cursor.close()
+                conn.close()
+                return
+            
+            # Match help records to attempts based on question text in request_text
+            total_linked = 0
+            for help_id, request_text in help_records:
+                for attempt_id, question in zip(attempt_ids, questions):
+                    if attempt_id and question and question[:50] in (request_text or ''):
+                        cursor.execute(
+                            "UPDATE knowledge_usage_log SET attempt_id = %s WHERE id = %s",
+                            (attempt_id, help_id)
+                        )
+                        total_linked += 1
+                        break  # Move to next help record
+            
             conn.commit()
             cursor.close()
             conn.close()
             
-            if updated_count > 0:
-                logger.debug(f"Linked {updated_count} help record(s) to attempt {attempt_id}")
-            else:
-                logger.debug(f"No pre-answer help found to link to attempt {attempt_id}")
+            logger.debug(f"Linked {total_linked} help record(s) for session {quiz_session_id}")
             
         except Exception as e:
-            logger.error(f"Error linking help to attempt: {e}")
+            logger.error(f"Error linking help records by session: {e}")
             # Don't raise - this is a non-critical operation
     
     @staticmethod

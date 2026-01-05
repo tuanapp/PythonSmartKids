@@ -376,6 +376,14 @@ class VercelMigrationManager:
             attempt_id_result = self.apply_migration_017()
             logger.info(f"Attempt ID migration result: {attempt_id_result['message']}")
             
+            # Add quiz_session_id to knowledge_usage_log table
+            quiz_session_id_result = self.apply_migration_018()
+            logger.info(f"Quiz session ID migration result: {quiz_session_id_result['message']}")
+            
+            # Migration 017: Add question_number to knowledge_usage_log
+            question_number_result = self.apply_migration_017()
+            logger.info(f"Question number migration result: {question_number_result['message']}")
+            
             # Verify the migration was successful
             status = self.check_migration_status()
             
@@ -403,7 +411,9 @@ class VercelMigrationManager:
                     'Knowledge usage log enhancements',
                     'Performance reports table',
                     'Visual limits on subjects table',
-                    'Attempt ID in knowledge usage log'
+                    'Attempt ID in knowledge usage log',
+                    'Quiz session ID in knowledge usage log',
+                    'Question number in knowledge usage log'
                 ]
             }
             
@@ -1871,6 +1881,160 @@ class VercelMigrationManager:
             # Update migration version to 017
             cursor.execute("""
                 DELETE FROM alembic_version WHERE version_num IN ('017', '016', '015', '014', '013', '012', '011', '010', '009', '008', '007', '2d3eefae954c')
+            """)
+            cursor.execute("""
+                INSERT INTO alembic_version (version_num) VALUES ('017')
+                ON CONFLICT (version_num) DO NOTHING
+            """)
+            messages.append("Updated alembic version to 017")
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            return {
+                'success': True,
+                'message': '; '.join(messages) if messages else 'Migration 017 already applied'
+            }
+        
+        except Exception as e:
+            logger.error(f"Error in migration 017: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def apply_migration_018(self) -> Dict[str, Any]:
+        """
+        Apply migration 018: Add quiz_session_id to knowledge_usage_log and knowledge_question_attempts tables.
+        
+        Groups quiz activities (questions + help requests + attempts) by session for accurate linking.
+        """
+        try:
+            conn = self.db_provider._get_connection()
+            cursor = conn.cursor()
+            messages = []
+            
+            # Add quiz_session_id to knowledge_usage_log table
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.columns 
+                    WHERE table_name = 'knowledge_usage_log' AND column_name = 'quiz_session_id'
+                )
+            """)
+            usage_log_quiz_session_id_exists = cursor.fetchone()[0]
+            
+            if not usage_log_quiz_session_id_exists:
+                cursor.execute("""
+                    ALTER TABLE knowledge_usage_log 
+                    ADD COLUMN quiz_session_id VARCHAR(36)
+                """)
+                messages.append("Added quiz_session_id column to knowledge_usage_log table")
+                logger.info("Added quiz_session_id column to knowledge_usage_log table")
+                
+                cursor.execute("""
+                    CREATE INDEX idx_usage_log_quiz_session_id 
+                    ON knowledge_usage_log(quiz_session_id)
+                """)
+                messages.append("Created index idx_usage_log_quiz_session_id")
+                logger.info("Created index idx_usage_log_quiz_session_id on knowledge_usage_log table")
+            else:
+                messages.append("quiz_session_id column already exists on knowledge_usage_log table")
+            
+            # Add quiz_session_id to knowledge_question_attempts table
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.columns 
+                    WHERE table_name = 'knowledge_question_attempts' AND column_name = 'quiz_session_id'
+                )
+            """)
+            attempts_quiz_session_id_exists = cursor.fetchone()[0]
+            
+            if not attempts_quiz_session_id_exists:
+                cursor.execute("""
+                    ALTER TABLE knowledge_question_attempts 
+                    ADD COLUMN quiz_session_id VARCHAR(36)
+                """)
+                messages.append("Added quiz_session_id column to knowledge_question_attempts table")
+                logger.info("Added quiz_session_id column to knowledge_question_attempts table")
+                
+                cursor.execute("""
+                    CREATE INDEX idx_attempts_quiz_session_id 
+                    ON knowledge_question_attempts(quiz_session_id)
+                """)
+                messages.append("Created index idx_attempts_quiz_session_id")
+                logger.info("Created index idx_attempts_quiz_session_id on knowledge_question_attempts table")
+            else:
+                messages.append("quiz_session_id column already exists on knowledge_question_attempts table")
+            
+            # Update migration version to 018
+            cursor.execute("""
+                DELETE FROM alembic_version WHERE version_num IN ('018', '017', '016', '015', '014', '013', '012', '011', '010', '009', '008', '007', '2d3eefae954c')
+            """)
+            cursor.execute("""
+                INSERT INTO alembic_version (version_num) VALUES ('018')
+                ON CONFLICT (version_num) DO NOTHING
+            """)
+            messages.append("Updated alembic version to 018")
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            return {
+                'success': True,
+                'message': '; '.join(messages) if messages else 'Migration 018 already applied'
+            }
+        
+        except Exception as e:
+            logger.error(f"Error in migration 018: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    def apply_migration_017(self) -> Dict[str, Any]:
+        """
+        Migration 017: Add question_number column to knowledge_usage_log table.
+        This enables tracking which question each help request belongs to.
+        """
+        try:
+            conn = self.db_provider._get_connection()
+            cursor = conn.cursor()
+            messages = []
+            
+            # Check if question_number column exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.columns 
+                    WHERE table_name = 'knowledge_usage_log' 
+                    AND column_name = 'question_number'
+                )
+            """)
+            question_number_exists = cursor.fetchone()[0]
+            
+            if not question_number_exists:
+                # Add question_number column
+                cursor.execute("""
+                    ALTER TABLE knowledge_usage_log 
+                    ADD COLUMN question_number INTEGER
+                """)
+                messages.append("Added question_number column to knowledge_usage_log table")
+                logger.info("Added question_number column to knowledge_usage_log table")
+                
+                # Add composite index for efficient queries by session + question
+                cursor.execute("""
+                    CREATE INDEX idx_usage_log_session_question 
+                    ON knowledge_usage_log(quiz_session_id, question_number)
+                """)
+                messages.append("Created index idx_usage_log_session_question")
+                logger.info("Created composite index on (quiz_session_id, question_number)")
+            else:
+                messages.append("question_number column already exists on knowledge_usage_log table")
+            
+            # Update migration version to 017
+            cursor.execute("""
+                DELETE FROM alembic_version WHERE version_num IN ('017')
             """)
             cursor.execute("""
                 INSERT INTO alembic_version (version_num) VALUES ('017')

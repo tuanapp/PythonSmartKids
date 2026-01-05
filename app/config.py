@@ -43,6 +43,9 @@ MAX_ATTEMPTS_HISTORY_LIMIT = int(os.getenv("MAX_ATTEMPTS_HISTORY_LIMIT", "20"))
 # Testing settings
 RUN_REAL_API_TESTS = os.getenv("RUN_REAL_API_TESTS", "False").lower() == "true"
 
+# Debug settings
+DEBUG_MODE = os.getenv("DebugMode", "0") == "1"
+
 # Below are Phase B - Reporting/Analytics configurations
 
 # Neo4j settings for performance reports

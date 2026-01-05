@@ -8,6 +8,7 @@ from app.services.performance_report_service import performance_report_service
 from app.repositories import db_service
 from app.db.vercel_migrations import migration_manager
 from app.db.models import get_session
+import uuid
 from app.db.db_factory import DatabaseFactory
 from datetime import datetime, UTC
 import logging
@@ -1082,6 +1083,9 @@ async def generate_knowledge_questions(request: dict):
     if count < 1 or count > 50:
         raise HTTPException(status_code=400, detail="count must be between 1 and 50")
     
+    # Generate quiz_session_id on server
+    quiz_session_id = str(uuid.uuid4())
+    
     try:
         # Check user exists and get subscription info
         user_data = db_service.get_user_by_uid(uid)
@@ -1180,7 +1184,8 @@ async def generate_knowledge_questions(request: dict):
                 past_incorrect_attempts_count=ai_summary.get('past_incorrect_attempts_count'),
                 is_llm_only=ai_summary.get('is_llm_only'),
                 level=level,
-                focus_weak_areas=focus_weak_areas
+                focus_weak_areas=focus_weak_areas,
+                quiz_session_id=quiz_session_id
             )
             
             # Record credit usage
@@ -1204,7 +1209,8 @@ async def generate_knowledge_questions(request: dict):
                 "daily_limit": max_daily,
                 "is_premium": is_premium,
                 "credits_remaining": new_credits,
-                "subject": subject
+                "subject": subject,
+                "quiz_session_id": quiz_session_id
             }
         
         # Build knowledge_document_ids as comma-separated string
@@ -1255,7 +1261,9 @@ async def generate_knowledge_questions(request: dict):
             past_incorrect_attempts_count=ai_summary.get('past_incorrect_attempts_count'),
             is_llm_only=ai_summary.get('is_llm_only'),
             level=level,
-            focus_weak_areas=focus_weak_areas
+            focus_weak_areas=focus_weak_areas,
+            quiz_session_id=quiz_session_id,
+            question_number=None
         )
         
         # Record credit usage for analytics (with model tracking)
@@ -1284,7 +1292,8 @@ async def generate_knowledge_questions(request: dict):
             "daily_limit": max_daily,
             "is_premium": is_premium,
             "credits_remaining": new_credits,
-            "subject": subject
+            "subject": subject,
+            "quiz_session_id": quiz_session_id
         }
         
     except HTTPException:
@@ -1316,6 +1325,7 @@ async def evaluate_answers(request: dict):
     subject_id = request.get('subject_id')
     evaluations = request.get('evaluations', [])
     is_live = request.get('is_live', 1)
+    quiz_session_id = request.get('quiz_session_id')  # NEW: Session ID for linking help records
     
     if not uid:
         raise HTTPException(status_code=400, detail="uid is required")
@@ -1371,27 +1381,26 @@ async def evaluate_answers(request: dict):
                     improvement_tips=result.get('improvement_tips'),
                     score=result.get('score'),
                     difficulty_level=original.get('difficulty'),
-                    topic=original.get('topic')
+                    topic=original.get('topic'),
+                    quiz_session_id=quiz_session_id
                 )
                 attempt_ids.append(attempt_id)
-                
-                # NEW: Update any pre-answer help records with this attempt_id
-                # This links help that was requested before submission to the saved attempt
-                if attempt_id:
-                    try:
-                        KnowledgeService.link_help_to_attempt(
-                            uid=uid,
-                            question=result.get('question', ''),
-                            attempt_id=attempt_id,
-                            subject_id=subject_id,
-                            created_at=str(created_at)
-                        )
-                    except Exception as link_error:
-                        logger.warning(f"Failed to link help to attempt {attempt_id}: {link_error}")
                 
             except Exception as save_error:
                 logger.warning(f"Failed to save attempt: {save_error}")
                 attempt_ids.append(None)  # Keep array length consistent
+        
+        # NEW: Link pre-answer help records using quiz_session_id
+        if quiz_session_id:
+            try:
+                questions = [r.get('question', '') for r in results]
+                KnowledgeService.link_help_records_by_session(
+                    quiz_session_id=quiz_session_id,
+                    attempt_ids=attempt_ids,
+                    questions=questions
+                )
+            except Exception as link_error:
+                logger.warning(f"Failed to link help records for session {quiz_session_id}: {link_error}")
         
         # Calculate summary stats
         correct_count = sum(1 for r in results if r.get('status') == 'correct')
@@ -1475,6 +1484,8 @@ async def generate_question_help(request: dict):
     is_live = request.get('is_live', 1)
     visual_preference = request.get('visual_preference', 'text')  # 'text', 'json', or 'svg'
     attempt_id = request.get('attempt_id')  # Optional: ID of the attempt this help is for
+    quiz_session_id = request.get('quiz_session_id')  # NEW: Session ID for linking
+    question_number = request.get('question_number')  # NEW: Question number in quiz (1-based)
     
     if not uid:
         raise HTTPException(status_code=400, detail="uid is required")
@@ -1567,7 +1578,9 @@ async def generate_question_help(request: dict):
                 log_type=log_type,
                 is_live=is_live,
                 used_fallback=used_fallback,
-                attempt_id=attempt_id  # Link help to specific attempt
+                attempt_id=attempt_id,  # Link help to specific attempt
+                quiz_session_id=quiz_session_id,  # NEW: Session ID for grouping
+                question_number=question_number  # NEW: Question number in quiz
             )
         except Exception as log_error:
             logger.warning(f"Failed to log help usage: {log_error}")
@@ -1654,16 +1667,16 @@ async def get_knowledge_sessions(
 @router.get("/knowledge/attempts")
 async def get_knowledge_attempts(
     uid: str,
-    session_timestamp: str = None,
+    quiz_session_id: str = None,
     subject_id: int = None
 ):
     """
     Get knowledge quiz attempts for a user.
-    Can retrieve attempts from a specific session (timestamp) or all attempts.
+    Can retrieve attempts from a specific session or all attempts.
     
     Query parameters:
     - uid: str (required) - Firebase User UID
-    - session_timestamp: str (optional) - ISO timestamp to get specific session
+    - quiz_session_id: str (optional) - Session ID to get specific session
     - subject_id: int (optional) - Filter by subject
     
     Returns:
@@ -1675,11 +1688,11 @@ async def get_knowledge_attempts(
         raise HTTPException(status_code=400, detail="uid is required")
     
     try:
-        if session_timestamp:
+        if quiz_session_id:
             # Get specific session attempts
             attempts = KnowledgeService.get_attempts_by_session(
                 uid=uid,
-                session_timestamp=session_timestamp,
+                quiz_session_id=quiz_session_id,
                 subject_id=subject_id
             )
         else:

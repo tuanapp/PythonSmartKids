@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import routes
 from app.api import version as version_routes
 from app.middleware.user_blocking_middleware import UserBlockingMiddleware
+from app.middleware.logging_middleware import LoggingMiddleware
 import logging
 
 # Configure logging
@@ -22,6 +23,9 @@ app.add_middleware(
 
 # Add user blocking middleware
 app.add_middleware(UserBlockingMiddleware)
+
+# Add logging middleware (logs all requests/responses if DebugMode=1)
+app.add_middleware(LoggingMiddleware)
 
 @app.on_event("startup")
 async def startup_event():
