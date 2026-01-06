@@ -778,7 +778,7 @@ Add "visual" field to relevant steps:
 
 **Response Format (valid JSON only):**
 {{
-  "question_variant": "...",  // The actual question being explained (SIMILAR if pre-answer, EXACT if post-answer)
+  "question_variant": "{question if has_answered else 'your newly generated similar question'}",  // If post-answer: copy the question text exactly as provided. If pre-answer: write your new similar question here
   "help_steps": [
     {{
       "step_number": 1,
@@ -803,7 +803,7 @@ Add "visual" field to relevant steps:
 5. End with a summary/takeaway
 6. Visuals: ONLY use when they genuinely aid understanding (not decorative)
 7. Avoid overwhelming the student - keep it focused and concise
-8. {"CRITICAL: Generate a SIMILAR question with different numbers/scenario - do NOT use the original question!" if not has_answered else "Explain the EXACT question provided above."}
+8. {"CRITICAL: In 'question_variant' field, generate a SIMILAR question with different numbers/scenario. DO NOT copy the original question!" if not has_answered else "CRITICAL: In 'question_variant' field, copy the exact question text provided above word-for-word. Do NOT write 'EXACT' or any placeholder."}
 
 Return ONLY the JSON object, no additional text.
 """
