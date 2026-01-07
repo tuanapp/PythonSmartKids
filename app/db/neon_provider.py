@@ -226,15 +226,16 @@ class NeonProvider(DatabaseProvider):
             
             # Insert or update the user registration
             cursor.execute("""
-                INSERT INTO users (uid, email, name, display_name, grade_level, subscription, registration_date)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO users (uid, email, name, display_name, grade_level, subscription, registration_date, promo_code)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (uid) 
                 DO UPDATE SET 
                     email = EXCLUDED.email,
                     name = EXCLUDED.name,
                     display_name = EXCLUDED.display_name,
                     grade_level = EXCLUDED.grade_level,
-                    subscription = EXCLUDED.subscription
+                    subscription = EXCLUDED.subscription,
+                    promo_code = EXCLUDED.promo_code
             """, (
                 user.uid,
                 user.email,
@@ -242,7 +243,8 @@ class NeonProvider(DatabaseProvider):
                 user.displayName,
                 user.gradeLevel,
                 user.subscription,
-                registration_date
+                registration_date,
+                user.promoCode
             ))
             
             conn.commit()

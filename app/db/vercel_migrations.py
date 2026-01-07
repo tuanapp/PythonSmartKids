@@ -234,6 +234,17 @@ class VercelMigrationManager:
             """)
             performance_reports_exists = cursor.fetchone()[0]
             
+            # Check if promo_code column exists on users table
+            promo_code_exists = False
+            if 'users' in existing_tables:
+                cursor.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.columns 
+                        WHERE table_name = 'users' AND column_name = 'promo_code'
+                    )
+                """)
+                promo_code_exists = cursor.fetchone()[0]
+            
             cursor.close()
             conn.close()
             
@@ -271,9 +282,11 @@ class VercelMigrationManager:
                 'focus_weak_areas_exists': focus_weak_areas_exists,
                 'log_type_exists': log_type_exists,
                 'performance_reports_exists': performance_reports_exists,
+                'promo_code_exists': promo_code_exists,
                 'needs_migration': (
-                    current_version != '016' or  # Updated to latest version
+                    current_version != '019' or  # Updated to latest version
                     not performance_reports_exists or
+                    not promo_code_exists or
                     not notes_column_exists or 
                     not level_column_exists or
                     not prompts_table_exists or
@@ -384,6 +397,10 @@ class VercelMigrationManager:
             question_number_result = self.apply_migration_017()
             logger.info(f"Question number migration result: {question_number_result['message']}")
             
+            # Migration 019: Add promo_code column to users table
+            promo_code_result = self.apply_migration_019()
+            logger.info(f"Promo code migration result: {promo_code_result['message']}")
+            
             # Verify the migration was successful
             status = self.check_migration_status()
             
@@ -413,7 +430,8 @@ class VercelMigrationManager:
                     'Visual limits on subjects table',
                     'Attempt ID in knowledge usage log',
                     'Quiz session ID in knowledge usage log',
-                    'Question number in knowledge usage log'
+                    'Question number in knowledge usage log',
+                    'Promo code column on users table'
                 ]
             }
             
@@ -2053,6 +2071,73 @@ class VercelMigrationManager:
         
         except Exception as e:
             logger.error(f"Error in migration 017: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def apply_migration_019(self) -> Dict[str, Any]:
+        """
+        Apply migration 019: Add promo_code column to users table.
+        
+        Adds optional promo_code field (max 10 characters) to users table.
+        This field stores promotional codes or affiliated institute codes.
+        """
+        try:
+            conn = self.db_provider._get_connection()
+            cursor = conn.cursor()
+            messages = []
+            
+            # Check if promo_code column exists on users table
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.columns 
+                    WHERE table_name = 'users' AND column_name = 'promo_code'
+                )
+            """)
+            promo_code_exists = cursor.fetchone()[0]
+            
+            if not promo_code_exists:
+                # Add promo_code column
+                cursor.execute("""
+                    ALTER TABLE users 
+                    ADD COLUMN promo_code VARCHAR(10)
+                """)
+                messages.append("Added promo_code column to users table")
+                logger.info("Added promo_code column to users table (max 10 characters)")
+                
+                # Add index for efficient promo code queries (for analytics/reporting)
+                cursor.execute("""
+                    CREATE INDEX idx_users_promo_code 
+                    ON users(promo_code) 
+                    WHERE promo_code IS NOT NULL
+                """)
+                messages.append("Created partial index idx_users_promo_code")
+                logger.info("Created index on promo_code for analytics")
+            else:
+                messages.append("promo_code column already exists on users table")
+            
+            # Update migration version to 019
+            cursor.execute("""
+                DELETE FROM alembic_version WHERE version_num IN ('019', '018', '017', '016', '015', '014', '013', '012', '011', '010', '009', '008', '007', '2d3eefae954c')
+            """)
+            cursor.execute("""
+                INSERT INTO alembic_version (version_num) VALUES ('019')
+                ON CONFLICT (version_num) DO NOTHING
+            """)
+            messages.append("Updated alembic version to 019")
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            return {
+                'success': True,
+                'message': '; '.join(messages) if messages else 'Migration 019 already applied'
+            }
+        
+        except Exception as e:
+            logger.error(f"Error in migration 019: {e}")
             return {
                 'success': False,
                 'error': str(e)
