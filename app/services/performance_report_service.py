@@ -7,6 +7,8 @@ import os
 import re
 import operator
 import json
+import time
+import random
 from typing import Annotated, List, Optional, TypedDict, Literal, Dict, Any, Tuple
 import logging
 from datetime import datetime
@@ -14,6 +16,7 @@ from datetime import datetime
 import pandas as pd
 import psycopg2
 from neo4j import GraphDatabase
+from neo4j.exceptions import SessionExpired, ServiceUnavailable, TransientError
 
 # Optional imports with fallback
 try:
@@ -70,6 +73,48 @@ logger = logging.getLogger(__name__)
 # Minimum attempts for a subject to be considered sufficient evidence
 MIN_ATTEMPTS_PER_SUBJECT = 10
 DEFAULT_MODEL_NAME = "gemini-2.5-flash"
+
+# Neo4j batch processing configuration
+NEO4J_BATCH_SIZE = 250  # Process attempts in batches to avoid session timeout
+NEO4J_MAX_RETRIES = 3  # Maximum retry attempts for transient errors
+NEO4J_RETRY_DELAY = 1.0  # Initial retry delay in seconds (will use exponential backoff)
+
+def retry_with_backoff(max_retries=NEO4J_MAX_RETRIES, initial_delay=NEO4J_RETRY_DELAY):
+    """Decorator for retrying Neo4j operations with exponential backoff."""
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            delay = initial_delay
+            last_exception = None
+            
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except (SessionExpired, ServiceUnavailable, TransientError, ConnectionResetError) as e:
+                    last_exception = e
+                    if attempt < max_retries - 1:
+                        # Add jitter to avoid thundering herd
+                        jitter = random.uniform(0, 0.1 * delay)
+                        sleep_time = delay + jitter
+                        logger.warning(
+                            f"Neo4j transient error on attempt {attempt + 1}/{max_retries}: {e}. "
+                            f"Retrying in {sleep_time:.2f}s..."
+                        )
+                        time.sleep(sleep_time)
+                        delay *= 2  # Exponential backoff
+                    else:
+                        logger.error(f"Neo4j operation failed after {max_retries} attempts: {e}")
+                        raise
+                except Exception as e:
+                    # Non-transient errors should fail immediately
+                    logger.error(f"Non-transient error in Neo4j operation: {e}")
+                    raise
+            
+            # Should never reach here, but just in case
+            if last_exception:
+                raise last_exception
+        
+        return wrapper
+    return decorator
 
 EMAIL_RE = re.compile(r"(?i)\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b")
 PHONE_RE = re.compile(r"(?<!\\d)(?:\\+?\\d[\\d\\s().-]{7,}\\d)")
@@ -740,7 +785,9 @@ class DataIngesterAgent:
 
         return None
 
+    @retry_with_backoff(max_retries=NEO4J_MAX_RETRIES, initial_delay=NEO4J_RETRY_DELAY)
     def run_neo4j_query(self, query: str, params: Optional[dict] = None):
+        """Execute a Neo4j query with retry logic for transient errors."""
         driver = self.neo4j_driver
         created_driver = False
         if driver is None:
@@ -760,12 +807,45 @@ class DataIngesterAgent:
                     driver.close()
                 except Exception:
                     pass
+    
+    def run_neo4j_batch_transaction(self, transaction_func, *args, **kwargs):
+        """Execute a Neo4j transaction with retry logic."""
+        @retry_with_backoff(max_retries=NEO4J_MAX_RETRIES, initial_delay=NEO4J_RETRY_DELAY)
+        def execute_transaction():
+            with self.neo4j_driver.session(database=NEO4J_DATABASE) as session:
+                return session.execute_write(transaction_func, *args, **kwargs)
+        
+        return execute_transaction()
 
     def create_vector_index(self):
         if SENTENCE_TRANSFORMERS_AVAILABLE:
             logger.info("🔄 Creating vector index in Neo4j...")
             drop_vector_index_if_exists(self.neo4j_driver, "attempt_embeddings")
             create_vector_index(self.neo4j_driver, EMBEDDING_DIMENSIONS, "attempt_embeddings")
+            
+            # Create topic/subtopic/concept vector indexes for semantic search
+            drop_vector_index_if_exists(self.neo4j_driver, "topic_embeddings")
+            drop_vector_index_if_exists(self.neo4j_driver, "subtopic_embeddings")
+            drop_vector_index_if_exists(self.neo4j_driver, "concept_embeddings")
+            
+            create_vector_index(self.neo4j_driver, EMBEDDING_DIMENSIONS, "topic_embeddings")
+            create_vector_index(self.neo4j_driver, EMBEDDING_DIMENSIONS, "subtopic_embeddings")
+            create_vector_index(self.neo4j_driver, EMBEDDING_DIMENSIONS, "concept_embeddings")
+            
+            # Create property indexes for fast filtering
+            logger.info("🔄 Creating property indexes for performance optimization...")
+            with self.neo4j_driver.session(database=NEO4J_DATABASE) as session:
+                # Index on KnowledgeAttempt properties
+                session.run("CREATE INDEX ka_topic_idx IF NOT EXISTS FOR (ka:KnowledgeAttempt) ON (ka.topic)")
+                session.run("CREATE INDEX ka_subtopic_idx IF NOT EXISTS FOR (ka:KnowledgeAttempt) ON (ka.subtopic)")
+                session.run("CREATE INDEX ka_concept_idx IF NOT EXISTS FOR (ka:KnowledgeAttempt) ON (ka.concept)")
+                session.run("CREATE INDEX ka_topic_norm_idx IF NOT EXISTS FOR (ka:KnowledgeAttempt) ON (ka.topicNormalized)")
+                session.run("CREATE INDEX ka_subtopic_norm_idx IF NOT EXISTS FOR (ka:KnowledgeAttempt) ON (ka.subtopicNormalized)")
+                session.run("CREATE INDEX ka_concept_norm_idx IF NOT EXISTS FOR (ka:KnowledgeAttempt) ON (ka.conceptNormalized)")
+                session.run("CREATE INDEX ka_uid_idx IF NOT EXISTS FOR (ka:KnowledgeAttempt) ON (ka.uid)")
+                # Composite index for common query pattern
+                session.run("CREATE INDEX ka_uid_topic_idx IF NOT EXISTS FOR (ka:KnowledgeAttempt) ON (ka.uid, ka.topicNormalized)")
+            logger.info("  ✅ Property indexes created")
 
     def extract_data(self, state: AgentState) -> AgentState:
         logger.info("🔄 Agent 1: Extracting data from PostgreSQL...")
@@ -803,116 +883,10 @@ class DataIngesterAgent:
         )
         return state
 
-    def import_to_neo4j_with_embeddings(self, state: AgentState) -> AgentState:
-        logger.info("🔄 Agent 1: Importing to Neo4j with embeddings...")
-        logger.info("  ⚠️ This will wipe the Neo4j database contents in the configured DB.")
-
-        self.run_neo4j_query("MATCH (n) DETACH DELETE n")
-        ensure_constraints(self.neo4j_driver)
-        self.create_vector_index()
-
-        # Import students
-        for _, student in state["students_df"].iterrows():
-            name_prefix = (student.get("name") or "")[:3]
-            self.run_neo4j_query(
-                """
-                MERGE (s:Student {uid: $uid})
-                SET s.gradeLevel = $grade_level, s.namePrefix = $name_prefix
-                """,
-                {
-                    "uid": student["uid"],
-                    "grade_level": student.get("grade_level"),
-                    "name_prefix": name_prefix,
-                },
-            )
-
-        # Import subjects
-        for _, subject in state["subjects_df"].iterrows():
-            self.run_neo4j_query(
-                """
-                MERGE (sub:Subject {id: $id})
-                SET sub.name = $name, sub.description = $description
-                """,
-                {
-                    "id": str(subject["id"]),
-                    "name": subject.get("name"),
-                    "description": subject.get("description"),
-                },
-            )
-
-        # Import attempts with embeddings and AI-categorization
-        logger.info("  🧠 Generating embeddings and categorizing questions...")
-
-        attempts = state["attempts_df"]
-        subjects_df = state["subjects_df"]
-        
-        # Group attempts by subject for batch categorization
-        subject_id_to_name = {str(row["id"]): row.get("name", "Unknown") for _, row in subjects_df.iterrows()}
-        attempts_by_subject = {}
-        for idx, attempt in attempts.iterrows():
-            subject_id = str(attempt.get("subject_id"))
-            if subject_id not in attempts_by_subject:
-                attempts_by_subject[subject_id] = []
-            attempts_by_subject[subject_id].append({
-                "index": idx,
-                "id": attempt["id"],
-                "question": attempt.get("question"),
-                "attempt_data": attempt
-            })
-        
-        # Categorize questions by subject in batches with hierarchical taxonomy
-        question_categories = {}
-        for subject_id, subject_attempts in attempts_by_subject.items():
-            subject_name = subject_id_to_name.get(subject_id, "Unknown")
-            logger.info(f"  🏷️ Hierarchically categorizing {len(subject_attempts)} {subject_name} questions...")
-            
-            questions_data = [{"id": a["id"], "question": a["question"]} for a in subject_attempts]
-            categories = _categorize_questions_hierarchical(questions_data, subject_name)
-            
-            for i, attempt_info in enumerate(subject_attempts):
-                question_categories[attempt_info["id"]] = categories[i] if i < len(categories) else {
-                    "topic": "General",
-                    "subtopic": "Uncategorized",
-                    "concept": "General concept",
-                    "difficulty": 2,
-                    "blooms_level": "understand"
-                }
-        
-        # Now import with embeddings and hierarchical categories
-        logger.info("  🔗 Creating hierarchical graph structure...")
-        for idx, attempt in attempts.iterrows():
-            embed_text = (
-                f"Question: {attempt.get('question')}. "
-                f"Student answered: {attempt.get('user_answer')}. "
-                f"Correct answer: {attempt.get('correct_answer')}"
-            )
-            
-            # Generate embedding if model is available
-            if self.embedding_model is not None:
-                try:
-                    embedding = self.embedding_model.encode(embed_text).tolist()
-                except Exception as e:
-                    logger.warning(f"Failed to generate embedding for attempt {attempt['id']}: {e}")
-                    # Use a simple text-based embedding as fallback
-                    embedding = [ord(c) % 100 for c in embed_text[:10]]
-            else:
-                # Use a simple text-based embedding as fallback
-                embedding = [ord(c) % 100 for c in embed_text[:10]]
-            
-            is_correct = attempt.get("evaluation_status") == "correct"
-            category_info = question_categories.get(attempt["id"], {
-                "topic": "General",
-                "subtopic": "Uncategorized",
-                "concept": "General concept",
-                "difficulty": 2,
-                "blooms_level": "understand"
-            })
-            
-            subject_id = str(attempt.get("subject_id"))
-            subject_name = subject_id_to_name.get(subject_id, "Unknown")
-
-            # Create hierarchical structure: Subject -> Topic -> SubTopic -> Concept -> Question -> KnowledgeAttempt
-            self.run_neo4j_query(
+    def _import_attempt_batch(self, tx, batch_data):
+        """Import a batch of attempts in a single transaction."""
+        for attempt_data in batch_data:
+            tx.run(
                 """
                 // Get or create Subject
                 MATCH (sub:Subject {id: $subject_id})
@@ -963,6 +937,9 @@ class DataIngesterAgent:
                     topic: $topic,
                     subtopic: $subtopic,
                     concept: $concept,
+                    topicNormalized: $topic_normalized,
+                    subtopicNormalized: $subtopic_normalized,
+                    conceptNormalized: $concept_normalized,
                     difficulty: $difficulty,
                     bloomsLevel: $blooms_level,
                     embedding: $embedding,
@@ -976,7 +953,191 @@ class DataIngesterAgent:
                 CREATE (ka)-[:BELONGS_TO]->(sub)
                 CREATE (ka)-[:ANSWERED]->(q)
                 """,
+                attempt_data
+            )
+
+    def get_existing_attempt_ids(self) -> set:
+        """Get IDs of attempts already imported to Neo4j for resume capability."""
+        try:
+            result = self.run_neo4j_query(
+                "MATCH (ka:KnowledgeAttempt) RETURN ka.id AS id"
+            )
+            return {record["id"] for record in result}
+        except Exception as e:
+            logger.warning(f"Could not fetch existing attempts: {e}")
+            return set()
+
+    def get_existing_student_uids(self) -> set:
+        """Get UIDs of students already imported to Neo4j."""
+        try:
+            result = self.run_neo4j_query(
+                "MATCH (s:Student) RETURN s.uid AS uid"
+            )
+            return {record["uid"] for record in result}
+        except Exception as e:
+            logger.warning(f"Could not fetch existing students: {e}")
+            return set()
+
+    def import_to_neo4j_with_embeddings(self, state: AgentState) -> AgentState:
+        logger.info("🔄 Agent 1: Importing to Neo4j with embeddings...")
+        
+        # Check for existing data to enable resume
+        existing_attempts = self.get_existing_attempt_ids()
+        existing_students = self.get_existing_student_uids()
+        
+        if existing_attempts:
+            logger.info(f"  ♻️ Found {len(existing_attempts)} existing attempts - will skip duplicates and resume")
+        else:
+            logger.info("  🆕 Starting fresh import - no existing data found")
+        
+        # Only wipe if explicitly needed (no existing data or force flag)
+        force_clean = state.get("force_clean_neo4j", False)
+        if force_clean or not existing_attempts:
+            logger.info("  ⚠️ Wiping Neo4j database contents...")
+            self.run_neo4j_query("MATCH (n) DETACH DELETE n")
+            existing_attempts = set()
+            existing_students = set()
+        
+        ensure_constraints(self.neo4j_driver)
+        self.create_vector_index()
+
+        # Import students (skip existing ones for resume)
+        students_imported = 0
+        students_skipped = 0
+        for _, student in state["students_df"].iterrows():
+            student_uid = student.get("uid")
+            if student_uid in existing_students:
+                students_skipped += 1
+                continue
+            
+            name_prefix = (student.get("name") or "")[:3]
+            self.run_neo4j_query(
+                """
+                MERGE (s:Student {uid: $uid})
+                SET s.gradeLevel = $grade_level, s.namePrefix = $name_prefix
+                """,
                 {
+                    "uid": student["uid"],
+                    "grade_level": student.get("grade_level"),
+                    "name_prefix": name_prefix,
+                },
+            )
+            students_imported += 1
+        
+        if students_skipped > 0:
+            logger.info(f"  ✅ Imported {students_imported} students, skipped {students_skipped} existing")
+        else:
+            logger.info(f"  ✅ Imported {students_imported} students")
+
+        # Import subjects (use MERGE for idempotent operations)
+        subjects_count = 0
+        for _, subject in state["subjects_df"].iterrows():
+            self.run_neo4j_query(
+                """
+                MERGE (sub:Subject {id: $id})
+                SET sub.name = $name, sub.description = $description
+                """,
+                {
+                    "id": str(subject["id"]),
+                    "name": subject.get("name"),
+                    "description": subject.get("description"),
+                },
+            )
+            subjects_count += 1
+        
+        logger.info(f"  ✅ Ensured {subjects_count} subjects exist")
+
+        # Import attempts with embeddings and AI-categorization
+        logger.info("  🧠 Generating embeddings and categorizing questions...")
+
+        attempts = state["attempts_df"]
+        subjects_df = state["subjects_df"]
+        
+        # Group attempts by subject for batch categorization
+        subject_id_to_name = {str(row["id"]): row.get("name", "Unknown") for _, row in subjects_df.iterrows()}
+        attempts_by_subject = {}
+        for idx, attempt in attempts.iterrows():
+            subject_id = str(attempt.get("subject_id"))
+            if subject_id not in attempts_by_subject:
+                attempts_by_subject[subject_id] = []
+            attempts_by_subject[subject_id].append({
+                "index": idx,
+                "id": attempt["id"],
+                "question": attempt.get("question"),
+                "attempt_data": attempt
+            })
+        
+        # Categorize questions by subject in batches with hierarchical taxonomy
+        question_categories = {}
+        for subject_id, subject_attempts in attempts_by_subject.items():
+            subject_name = subject_id_to_name.get(subject_id, "Unknown")
+            logger.info(f"  🏷️ Hierarchically categorizing {len(subject_attempts)} {subject_name} questions...")
+            
+            questions_data = [{"id": a["id"], "question": a["question"]} for a in subject_attempts]
+            categories = _categorize_questions_hierarchical(questions_data, subject_name)
+            
+            for i, attempt_info in enumerate(subject_attempts):
+                question_categories[attempt_info["id"]] = categories[i] if i < len(categories) else {
+                    "topic": "General",
+                    "subtopic": "Uncategorized",
+                    "concept": "General concept",
+                    "difficulty": 2,
+                    "blooms_level": "understand"
+                }
+        
+        # Now import with embeddings and hierarchical categories using batch processing
+        logger.info("  🔗 Creating hierarchical graph structure with batch processing...")
+        attempts_imported = 0
+        attempts_skipped = 0
+        attempts_failed = 0
+        
+        # Prepare batch data
+        batch = []
+        batch_failed_ids = []
+        
+        for idx, attempt in attempts.iterrows():
+            attempt_id = attempt["id"]
+            
+            # Skip already imported attempts (resume capability)
+            if attempt_id in existing_attempts:
+                attempts_skipped += 1
+                if (idx + 1) % 100 == 0:
+                    logger.info(f"    Progress: {idx + 1}/{len(attempts)} ({attempts_imported} new, {attempts_skipped} skipped, {attempts_failed} failed)")
+                continue
+            
+            try:
+                embed_text = (
+                    f"Question: {attempt.get('question')}. "
+                    f"Student answered: {attempt.get('user_answer')}. "
+                    f"Correct answer: {attempt.get('correct_answer')}"
+                )
+                
+                # Generate embedding if model is available
+                if self.embedding_model is not None:
+                    try:
+                        embedding = self.embedding_model.encode(embed_text).tolist()
+                    except Exception as e:
+                        logger.warning(f"Failed to generate embedding for attempt {attempt['id']}: {e}")
+                        # Use a simple text-based embedding as fallback
+                        embedding = [ord(c) % 100 for c in embed_text[:10]]
+                else:
+                    # Use a simple text-based embedding as fallback
+                    embedding = [ord(c) % 100 for c in embed_text[:10]]
+                
+                is_correct = attempt.get("evaluation_status") == "correct"
+                category_info = question_categories.get(attempt["id"], {
+                    "topic": "General",
+                    "subtopic": "Uncategorized",
+                    "concept": "General concept",
+                    "difficulty": 2,
+                    "blooms_level": "understand"
+                })
+                
+                subject_id = str(attempt.get("subject_id"))
+                subject_name = subject_id_to_name.get(subject_id, "Unknown")
+
+                # Add to batch
+                batch.append({
                     "attempt_id": attempt["id"],
                     "question": attempt.get("question"),
                     "is_correct": is_correct,
@@ -986,6 +1147,9 @@ class DataIngesterAgent:
                     "topic": category_info.get("topic", "General"),
                     "subtopic": category_info.get("subtopic", "Uncategorized"),
                     "concept": category_info.get("concept", "General concept"),
+                    "topic_normalized": category_info.get("topic", "General").lower().strip(),
+                    "subtopic_normalized": category_info.get("subtopic", "Uncategorized").lower().strip(),
+                    "concept_normalized": category_info.get("concept", "General concept").lower().strip(),
                     "difficulty": category_info.get("difficulty", 2),
                     "blooms_level": category_info.get("blooms_level", "understand"),
                     "uid": attempt.get("uid"),
@@ -993,16 +1157,116 @@ class DataIngesterAgent:
                     "subject_name": subject_name,
                     "embedding": embedding,
                     "embed_text": embed_text,
-                },
-            )
+                })
+                
+                # Process batch when it reaches the configured size
+                if len(batch) >= NEO4J_BATCH_SIZE:
+                    try:
+                        self.run_neo4j_batch_transaction(self._import_attempt_batch, batch)
+                        attempts_imported += len(batch)
+                        logger.info(f"    ✅ Batch completed: {len(batch)} attempts imported")
+                        batch = []
+                    except Exception as e:
+                        logger.error(f"    ❌ Batch failed: {e}. Will retry individually...")
+                        # Retry failed batch items individually
+                        for batch_item in batch:
+                            try:
+                                self.run_neo4j_batch_transaction(self._import_attempt_batch, [batch_item])
+                                attempts_imported += 1
+                            except Exception as retry_error:
+                                attempts_failed += 1
+                                batch_failed_ids.append(batch_item["attempt_id"])
+                                logger.error(f"    ❌ Failed to import attempt {batch_item['attempt_id']}: {retry_error}")
+                        batch = []
+                
+            except Exception as e:
+                attempts_failed += 1
+                batch_failed_ids.append(attempt_id)
+                logger.error(f"    ❌ Failed to prepare attempt {attempt_id}: {e}")
+                # Continue processing other attempts instead of failing completely
+            
+            if (idx + 1) % 100 == 0:
+                logger.info(f"    Progress: {idx + 1}/{len(attempts)} ({attempts_imported} new, {attempts_skipped} skipped, {attempts_failed} failed)")
+        
+        # Process remaining batch
+        if batch:
+            try:
+                self.run_neo4j_batch_transaction(self._import_attempt_batch, batch)
+                attempts_imported += len(batch)
+                logger.info(f"    ✅ Final batch completed: {len(batch)} attempts imported")
+            except Exception as e:
+                logger.error(f"    ❌ Final batch failed: {e}. Will retry individually...")
+                # Retry failed batch items individually
+                for batch_item in batch:
+                    try:
+                        self.run_neo4j_batch_transaction(self._import_attempt_batch, [batch_item])
+                        attempts_imported += 1
+                    except Exception as retry_error:
+                        attempts_failed += 1
+                        batch_failed_ids.append(batch_item["attempt_id"])
+                        logger.error(f"    ❌ Failed to import attempt {batch_item['attempt_id']}: {retry_error}")
+        
+        if batch_failed_ids:
+            logger.warning(f"    ⚠️ Failed attempt IDs: {batch_failed_ids[:10]}{'...' if len(batch_failed_ids) > 10 else ''}")
+        
+        logger.info(f"  📊 Final: {attempts_imported} imported, {attempts_skipped} skipped, {attempts_failed} failed out of {len(attempts)} total")
 
-            if (idx + 1) % 50 == 0:
-                logger.info(f"    Processed {idx + 1}/{len(attempts)} attempts with hierarchical structure")
+        # Generate and store embeddings for all unique topics, subtopics, and concepts for semantic search
+        if self.embedding_model:
+            logger.info("🔄 Generating embeddings for taxonomy terms (topics, subtopics, concepts)...")
+            unique_topics = set()
+            unique_subtopics = set()
+            unique_concepts = set()
+            
+            # Use question_categories dict that was already populated above
+            for attempt_id, category_info in question_categories.items():
+                topic = category_info.get("topic", "General")
+                subtopic = category_info.get("subtopic", "Uncategorized")
+                concept = category_info.get("concept", "General concept")
+                
+                unique_topics.add(topic)
+                unique_subtopics.add(subtopic)
+                unique_concepts.add(concept)
+            
+            # Embed and store topics
+            for topic_name in unique_topics:
+                topic_embedding = self.embedding_model.encode(topic_name).tolist()
+                self.run_neo4j_query(
+                    """
+                    MERGE (t:Topic {name: $name})
+                    SET t.embedding = $embedding
+                    """,
+                    {"name": topic_name, "embedding": topic_embedding}
+                )
+            
+            # Embed and store subtopics
+            for subtopic_name in unique_subtopics:
+                subtopic_embedding = self.embedding_model.encode(subtopic_name).tolist()
+                self.run_neo4j_query(
+                    """
+                    MERGE (st:SubTopic {name: $name})
+                    SET st.embedding = $embedding
+                    """,
+                    {"name": subtopic_name, "embedding": subtopic_embedding}
+                )
+            
+            # Embed and store concepts
+            for concept_name in unique_concepts:
+                concept_embedding = self.embedding_model.encode(concept_name).tolist()
+                self.run_neo4j_query(
+                    """
+                    MERGE (c:Concept {name: $name})
+                    SET c.embedding = $embedding
+                    """,
+                    {"name": concept_name, "embedding": concept_embedding}
+                )
+            
+            logger.info(f"  ✅ Generated embeddings for {len(unique_topics)} topics, {len(unique_subtopics)} subtopics, {len(unique_concepts)} concepts")
 
         state["messages"].append(
-            f"Agent 1: Imported {len(attempts)} attempts with hierarchical categorization to Neo4j"
+            f"Agent 1: Imported {attempts_imported} new attempts (skipped {attempts_skipped} existing, {attempts_failed} failed) to Neo4j"
         )
-        logger.info(f"  ✅ Neo4j import complete with hierarchical graph structure and {len(attempts)} embedded nodes")
+        logger.info(f"  ✅ Neo4j import complete: {attempts_imported} new nodes, {attempts_skipped} skipped, {attempts_failed} failed")
         return state
 
     def close(self):
@@ -1048,6 +1312,73 @@ class RetrieverAgent:
                     driver.close()
                 except Exception:
                     pass
+    
+    def _get_semantic_topic_matches(self, topic: Optional[str]) -> list:
+        """
+        Get semantically matched topics using embedding-based vector search.
+        Falls back to simple plural/singular variations if embedding search fails.
+        
+        Args:
+            topic: User-provided topic string
+        
+        Returns:
+            List of normalized topic names that match semantically
+        """
+        if not topic:
+            return []
+        
+        topic_normalized = topic.lower().strip()
+        matched_topics = [topic_normalized]
+        
+        # Try semantic matching using embeddings
+        if self.embedding_model and SENTENCE_TRANSFORMERS_AVAILABLE:
+            try:
+                # Encode the user's topic query
+                topic_embedding = self.embedding_model.encode(topic).tolist()
+                
+                # TODO: Embedding similarity threshold set to 0.7 for semantic matching.
+                # Adjust this value based on precision/recall analysis in production:
+                # - Lower (0.65): More matches, may include less relevant topics
+                # - Higher (0.8): Stricter matching, may miss valid synonyms
+                similarity_threshold = 0.7
+                
+                # Query topic, subtopic, and concept vector indexes
+                for index_name, node_label in [("topic_embeddings", "Topic"),
+                                                 ("subtopic_embeddings", "SubTopic"),
+                                                 ("concept_embeddings", "Concept")]:
+                    try:
+                        result = self.run_neo4j_query(
+                            f"""
+                            CALL db.index.vector.queryNodes('{index_name}', 5, $query_embedding)
+                            YIELD node, score
+                            WHERE score >= $threshold
+                            RETURN toLower(node.name) AS name, score
+                            ORDER BY score DESC
+                            """,
+                            {"query_embedding": topic_embedding, "threshold": similarity_threshold}
+                        )
+                        
+                        for record in result:
+                            name_normalized = record["name"]
+                            if name_normalized not in matched_topics:
+                                matched_topics.append(name_normalized)
+                    except Exception as idx_err:
+                        logger.debug(f"Vector index {index_name} query failed (may not exist yet): {idx_err}")
+                
+                if len(matched_topics) > 1:
+                    logger.info(f"  🎯 Semantic topic match: '{topic}' → {matched_topics}")
+                    return matched_topics
+            
+            except Exception as e:
+                logger.warning(f"Semantic topic matching failed, falling back to string variations: {e}")
+        
+        # Fallback: Simple plural/singular variations
+        if not topic_normalized.endswith('s'):
+            matched_topics.append(topic_normalized + 's')
+        else:
+            matched_topics.append(topic_normalized.rstrip('s'))
+        
+        return matched_topics
 
     def assess_evidence_quality(self, state: AgentState) -> float:
         """Calculate evidence quality score (0-1) based on retrieved data."""
@@ -1087,36 +1418,27 @@ class RetrieverAgent:
         subject = state.get("subject")
         topic = state.get("topic")
         
-        # Expand topic to include singular/plural variations
-        topic_variations = []
-        if topic:
-            topic_lower = topic.lower()
-            # Create variations: singular, plural, and the original
-            variations = [topic_lower]
-            # Add plural form (simple s-addition)
-            if not topic_lower.endswith('s'):
-                variations.append(topic_lower + 's')
-            else:
-                # Remove trailing 's' for singular form
-                variations.append(topic_lower.rstrip('s'))
-            topic_variations = variations
+        # Get semantically matched topics using embedding-based search with fallback
+        matched_topics = self._get_semantic_topic_matches(topic)
 
         # Get subject-level performance
         # Navigate through relationships: Student -> KnowledgeAttempt -> Question -> Topic
+        # Use normalized fields with IN for indexed exact matching (faster than CONTAINS)
         subject_result = self.run_neo4j_query(
             """
             MATCH (s:Student {uid: $uid})-[:ATTEMPTED]->(ka:KnowledgeAttempt)-[:BELONGS_TO]->(sub:Subject)
             OPTIONAL MATCH (ka)-[:ANSWERED]->(q:Question)-[:TESTS_TOPIC]->(t:Topic)
             WHERE ($subject IS NULL OR toLower(sub.name) = toLower($subject))
-              AND (size($topicVariations) = 0 OR 
-                   ANY(variant IN $topicVariations WHERE 
-                       toLower(t.name) CONTAINS variant))
+              AND (size($matchedTopics) = 0 OR 
+                   ka.topicNormalized IN $matchedTopics OR
+                   ka.subtopicNormalized IN $matchedTopics OR
+                   ka.conceptNormalized IN $matchedTopics)
             RETURN sub.name AS subject,
                    count(CASE WHEN ka.isCorrect = true THEN 1 END) AS correct,
                    count(CASE WHEN ka.isCorrect = false THEN 1 END) AS incorrect
             ORDER BY incorrect DESC
             """,
-            {"uid": uid, "subject": subject, "topicVariations": topic_variations},
+            {"uid": uid, "subject": subject, "matchedTopics": matched_topics},
         )
 
         performance_data = []
@@ -1134,14 +1456,16 @@ class RetrieverAgent:
         
         # Get hierarchical breakdown: Topic -> SubTopic -> Concept
         # Note: topic, subtopic, concept are properties on KnowledgeAttempt node (set during data ingestion)
+        # Use normalized fields with IN for indexed exact matching
         hierarchical_result = self.run_neo4j_query(
             """
             MATCH (s:Student {uid: $uid})-[:ATTEMPTED]->(ka:KnowledgeAttempt)-[:BELONGS_TO]->(sub:Subject)
             WHERE ($subject IS NULL OR toLower(sub.name) = toLower($subject))
               AND ka.topic IS NOT NULL
-              AND (size($topicVariations) = 0 OR 
-                   ANY(variant IN $topicVariations WHERE 
-                       toLower(ka.topic) CONTAINS variant))
+              AND (size($matchedTopics) = 0 OR 
+                   ka.topicNormalized IN $matchedTopics OR
+                   ka.subtopicNormalized IN $matchedTopics OR
+                   ka.conceptNormalized IN $matchedTopics)
             WITH sub.name AS subject, ka.topic AS topic, ka.subtopic AS subtopic, ka.concept AS concept,
                  ka.difficulty AS difficulty, ka.bloomsLevel AS bloomsLevel,
                  count(CASE WHEN ka.isCorrect = false THEN 1 END) AS incorrect_count,
@@ -1157,7 +1481,7 @@ class RetrieverAgent:
             ORDER BY subject, incorrect DESC, total DESC
             LIMIT 20
             """,
-            {"uid": uid, "subject": subject, "topicVariations": topic_variations},
+            {"uid": uid, "subject": subject, "matchedTopics": matched_topics},
         )
         
         # Build hierarchical context
@@ -1196,8 +1520,8 @@ class RetrieverAgent:
         hierarchical_text = "\n".join(hierarchical_lines) if hierarchical_result else ""
         
         filter_note = ""
-        if subject or topic_variations:
-            topic_display = f"{topic} (variants: {', '.join(topic_variations)})" if topic_variations else "any"
+        if subject or matched_topics:
+            topic_display = f"{topic} (matched: {', '.join(matched_topics)})" if matched_topics else "any"
             filter_note = f" (filtered by subject={subject or 'any'}, topic={topic_display})"
         
         state["graph_context"] = f"""Graph-based performance analysis{filter_note}:
@@ -1214,27 +1538,21 @@ class RetrieverAgent:
         subject = state.get("subject")
         topic = state.get("topic")
         
-        # Expand topic to include singular/plural variations
-        topic_variations = []
-        if topic:
-            topic_lower = topic.lower()
-            variations = [topic_lower]
-            if not topic_lower.endswith('s'):
-                variations.append(topic_lower + 's')
-            else:
-                variations.append(topic_lower.rstrip('s'))
-            topic_variations = variations
+        # Get semantically matched topics using embedding-based search with fallback
+        matched_topics = self._get_semantic_topic_matches(topic)
         
         logger.info(f"  🏷️ Retrieving hierarchical concept breakdown for subject={subject}...")
         
         # Query to get hierarchical concept statistics with difficulty and Bloom's level
+        # Use normalized fields with IN for indexed exact matching
         result = self.run_neo4j_query(
             """
             MATCH (s:Student {uid: $uid})-[:ATTEMPTED]->(ka:KnowledgeAttempt)-[:BELONGS_TO]->(sub:Subject)
             WHERE ($subject IS NULL OR toLower(sub.name) = toLower($subject))
-              AND (size($topicVariations) = 0 OR 
-                   ANY(variant IN $topicVariations WHERE 
-                       toLower(ka.topic) CONTAINS variant))
+              AND (size($matchedTopics) = 0 OR 
+                   ka.topicNormalized IN $matchedTopics OR
+                   ka.subtopicNormalized IN $matchedTopics OR
+                   ka.conceptNormalized IN $matchedTopics)
               AND ka.topic IS NOT NULL
             WITH sub.name AS subject, ka.topic AS topic, ka.subtopic AS subtopic, 
                  ka.concept AS concept, ka.difficulty AS difficulty, ka.bloomsLevel AS bloomsLevel,
@@ -1250,7 +1568,7 @@ class RetrieverAgent:
                         ELSE 0 END AS accuracy
             ORDER BY subject, topic, incorrect DESC, total DESC
             """,
-            {"uid": uid, "subject": subject, "topicVariations": topic_variations},
+            {"uid": uid, "subject": subject, "matchedTopics": matched_topics},
         )
         
         if not result:
@@ -1335,6 +1653,10 @@ class RetrieverAgent:
             dims = EMBEDDING_DIMENSIONS if EMBEDDING_DIMENSIONS and isinstance(EMBEDDING_DIMENSIONS, int) else 10
             query_embedding = (chars * ((dims // len(chars)) + 1))[:dims]
 
+        # Get semantically matched topics for filtering
+        matched_topics = self._get_semantic_topic_matches(topic)
+        topic_normalized = topic.lower().strip() if topic else None
+        
         result = self.run_neo4j_query(
             """
             CALL db.index.vector.queryNodes('attempt_embeddings', 10, $query_embedding)
@@ -1342,7 +1664,11 @@ class RetrieverAgent:
             MATCH (node)-[:BELONGS_TO]->(sub:Subject)
             WHERE node.uid = $uid
               AND ($subject IS NULL OR toLower(sub.name) = toLower($subject))
-              AND ($topic IS NULL OR toLower(node.topic) CONTAINS toLower($topic) OR toLower(node.question) CONTAINS toLower($topic))
+              AND ($topicNormalized IS NULL OR 
+                   node.topicNormalized IN $matchedTopics OR
+                   node.subtopicNormalized IN $matchedTopics OR
+                   node.conceptNormalized IN $matchedTopics OR
+                   toLower(node.question) CONTAINS $topicNormalized)
             RETURN node.question AS question, node.isCorrect AS isCorrect,
                    node.userAnswer AS userAnswer, node.correctAnswer AS correctAnswer,
                    node.topic AS topic, node.subtopic AS subtopic, node.concept AS concept,
@@ -1350,7 +1676,8 @@ class RetrieverAgent:
                    sub.name AS subject, score
             ORDER BY score DESC LIMIT 8
             """,
-            {"query_embedding": query_embedding, "uid": uid, "subject": subject, "topic": topic},
+            {"query_embedding": query_embedding, "uid": uid, "subject": subject, 
+             "topicNormalized": topic_normalized, "matchedTopics": matched_topics},
         )
 
         vector_context = []
@@ -2217,6 +2544,7 @@ class PerformanceReportService:
         start_time = datetime.now()
         trace_id = None
         state = make_initial_state(student_uid)
+        data_agent = None  # Initialize to None for cleanup in finally block
 
         try:
             # Check cooldown first
@@ -2342,38 +2670,36 @@ class PerformanceReportService:
                         'timestamp': end_time.isoformat()
                     }
 
-                return response
-
             # Wrap execution with LangSmith tracing if available
-                if self.langsmith_client and traceable:
+            if self.langsmith_client and traceable:
+                try:
+                    # Start an explicit LangSmith run so events/records are sent
+                    run = self.langsmith_client.runs.create(
+                        name=f"performance_report_{student_uid}_{int(start_time.timestamp())}",
+                        project=LANGSMITH_PROJECT,
+                        metadata={"student_uid": student_uid}
+                    )
+                    run_id = getattr(run, "id", None) or run.get("id") if isinstance(run, dict) else None
+                    # Attach traceable wrapper if available to capture nested traces
+                    @traceable(client=self.langsmith_client, project_name=LANGSMITH_PROJECT)
+                    def execute_workflow():
+                        return self._execute_workflow_steps(state, app, data_agent)
+
+                    workflow_result = execute_workflow()
+
+                    # Close/run finalize if client supports it
                     try:
-                        # Start an explicit LangSmith run so events/records are sent
-                        run = self.langsmith_client.runs.create(
-                            name=f"performance_report_{student_uid}_{int(start_time.timestamp())}",
-                            project=LANGSMITH_PROJECT,
-                            metadata={"student_uid": student_uid}
-                        )
-                        run_id = getattr(run, "id", None) or run.get("id") if isinstance(run, dict) else None
-                        # Attach traceable wrapper if available to capture nested traces
-                        @traceable(client=self.langsmith_client, project_name=LANGSMITH_PROJECT)
-                        def execute_workflow():
-                            return self._execute_workflow_steps(state, app, data_agent)
+                        # some LangSmith clients expose runs.finish or similar
+                        if hasattr(self.langsmith_client.runs, 'update') and run_id:
+                            self.langsmith_client.runs.update(run_id, status="succeeded")
+                    except Exception:
+                        pass
 
-                        workflow_result = execute_workflow()
-
-                        # Close/run finalize if client supports it
-                        try:
-                            # some LangSmith clients expose runs.finish or similar
-                            if hasattr(self.langsmith_client.runs, 'update') and run_id:
-                                self.langsmith_client.runs.update(run_id, status="succeeded")
-                        except Exception:
-                            pass
-
-                        trace_id = run_id or f"trace_{student_uid}_{int(start_time.timestamp())}"
-                    except Exception as e:
-                        logger.warning(f"LangSmith tracing failed to start run: {e}")
-                        workflow_result = self._execute_workflow_steps(state, app, data_agent)
-                        trace_id = f"trace_{student_uid}_{int(start_time.timestamp())}"
+                    trace_id = run_id or f"trace_{student_uid}_{int(start_time.timestamp())}"
+                except Exception as e:
+                    logger.warning(f"LangSmith tracing failed to start run: {e}")
+                    workflow_result = self._execute_workflow_steps(state, app, data_agent)
+                    trace_id = f"trace_{student_uid}_{int(start_time.timestamp())}"
             else:
                 workflow_result = self._execute_workflow_steps(state, app, data_agent)
 
@@ -2463,11 +2789,13 @@ class PerformanceReportService:
 
         finally:
             # Clean up connections
-            if self.data_agent:
-                self.data_agent.close()
+            if data_agent is not None:
+                try:
+                    data_agent.close()
+                except Exception as cleanup_error:
+                    logger.warning(f"Error during cleanup: {cleanup_error}")
 
     def _execute_workflow_steps(self, state: AgentState, app, data_agent) -> dict:
-        """Execute the full LangGraph workflow with enhanced error tracking."""
         try:
             # Initialize workflow progress
             state["workflow_progress"].append("Starting multi-agent workflow")
