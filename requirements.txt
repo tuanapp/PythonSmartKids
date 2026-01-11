@@ -9,7 +9,7 @@ alembic
 sqlalchemy
 requests
 # neo4j
-# pandas
+pandas
 # langgraph
 # google-genai
 google-api-python-client

@@ -25,12 +25,16 @@ migrations/
 
 # Development scripts and configs
 *.ps1
-*.md
 Dockerfile
-README.md
 pytest.ini
 pyvenv.cfg
 *.code-workspace
+
+# Documentation files (but keep requirements.txt)
+README.md
+CHANGELOG.md
+LICENSE.md
+CONTRIBUTING.md
 
 # Environment files
 .env
