@@ -1,5 +1,5 @@
 """
-Performance Report Service
+Performance Report Service v2.0
 Integrates the agentic workflow for student performance analysis
 """
 
@@ -69,6 +69,11 @@ def maybe_traceable(func):
     return func
 
 logger = logging.getLogger(__name__)
+
+# Suppress verbose debug logs from external libraries
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
+logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
 
 # Minimum attempts for a subject to be considered sufficient evidence
 MIN_ATTEMPTS_PER_SUBJECT = 10
@@ -370,6 +375,8 @@ class IntentRouterAgent:
             try:
                 genai.configure(api_key=GEMINI_API_KEY)
                 self.model = genai.GenerativeModel("gemini-2.5-flash")
+                api_key_preview = f"{GEMINI_API_KEY[:3]}...{GEMINI_API_KEY[-3:]}" if len(GEMINI_API_KEY) > 6 else "***"
+                logger.info(f"✅ IntentRouterAgent initialized with Gemini API key: {api_key_preview}")
             except Exception as e:
                 logger.warning(f"IntentRouterAgent init failed: {e}")
                 self.model = None
@@ -377,7 +384,16 @@ class IntentRouterAgent:
     def _heuristic_intent(self, query_text: str, subject: Optional[str] = None, topic: Optional[str] = None) -> str:
         lowered = (query_text or "").lower()
         
-        # Strong report indicators - MUST be checked first for exact matches
+        # Paper generation indicators - CHECK FIRST (highest priority)
+        paper_indicators = [
+            "exam paper", "revision paper", "test paper", "practice paper",
+            "marking scheme", "answer key", "generate paper", "create paper",
+            "exam questions", "test questions", "practice test", "mock exam"
+        ]
+        if any(indicator in lowered for indicator in paper_indicators):
+            return "paper"
+        
+        # Strong report indicators - MUST be checked second for exact matches
         report_indicators = [
             "generate report", "full report", "complete report",
             "performance report", "full analysis", "complete analysis",
@@ -408,27 +424,74 @@ class IntentRouterAgent:
         if not cleaned:
             return {"intent": "report", "subject": None, "topic": None}
 
-        subject, topic = _extract_subject_topic(cleaned)
+        # Use AI model for intelligent subject/topic extraction if available
+        if self.model:
+            try:
+                extraction_prompt = f"""Extract the SUBJECT and TOPIC from this educational query.
+
+Available subjects: Math, English, French, Science, Physics, Chemistry, Biology, History, Geography, IT, Sinhala, General Knowledge
+
+Return in this EXACT format:
+Subject: [subject name or "None"]
+Topic: [specific topic or "None"]
+
+Examples:
+- "Generate a Math exam paper on fractions" → Subject: Math, Topic: fractions
+- "What questions did I get wrong in English grammar?" → Subject: English, Topic: grammar
+- "Create a Science test about forces and motion" → Subject: Science, Topic: forces and motion
+- "Show my weak areas" → Subject: None, Topic: None
+
+User query: {cleaned}
+
+Extract now:"""
+                
+                response = self.model.generate_content(extraction_prompt)
+                text = (response.text or "").strip()
+                
+                # Parse AI response
+                subject = None
+                topic = None
+                for line in text.split('\n'):
+                    if line.lower().startswith('subject:'):
+                        s = line.split(':', 1)[1].strip()
+                        if s.lower() != 'none':
+                            subject = s
+                    elif line.lower().startswith('topic:'):
+                        t = line.split(':', 1)[1].strip()
+                        if t.lower() != 'none':
+                            topic = t
+                
+                logger.info(f"  🤖 AI extracted - Subject: {subject}, Topic: {topic}")
+                
+            except Exception as e:
+                logger.warning(f"AI subject extraction failed, using fallback: {e}")
+                subject, topic = _extract_subject_topic(cleaned)
+        else:
+            # Fallback to simple string matching if AI not available
+            subject, topic = _extract_subject_topic(cleaned)
+        
         intent = self._heuristic_intent(cleaned, subject, topic)
 
         if self.model:
             prompt = (
-                "Classify the user request into one of: report, qa.\n\n"
+                "Classify the user request into one of: paper, report, qa.\n\n"
+                "- 'paper' = Request to generate exam/test/revision paper with questions and marking scheme "
+                "(e.g., 'Create an exam paper', 'Generate a test paper', 'Make a revision paper', "
+                "'I need exam questions', 'Generate a practice test with marking scheme')\n"
                 "- 'qa' = Specific question about performance (e.g., 'What questions did I get wrong?', "
                 "'Which topics do I struggle with?', 'Types of questions I missed most often', "
                 "'Show me my weak areas in Math', 'What are my most common mistakes?')\n"
                 "- 'report' = Generic request for complete analysis (e.g., 'Generate full report', "
                 "'Complete performance analysis', 'Overall performance report')\n\n"
-                "Key: If the user asks about SPECIFIC aspects (wrong answers, types, topics, mistakes, weak areas), "
-                "classify as 'qa' even if they use words like 'summary' or 'provide'.\n\n"
-                "Return only the single word 'report' or 'qa'.\n\n"
+                "PRIORITY ORDER: Check for 'paper' first, then 'report', then default to 'qa'.\n\n"
+                "Return only the single word 'paper', 'report', or 'qa'.\n\n"
                 f"User request: {cleaned}"
             )
             try:
                 response = self.model.generate_content(prompt)
                 text = (response.text or "").strip().lower()
                 token = text.split()[0] if text else ""
-                if token in ("report", "qa"):
+                if token in ("paper", "report", "qa"):
                     intent = token
             except Exception as e:
                 logger.warning(f"IntentRouterAgent classify failed: {e}")
@@ -465,6 +528,10 @@ class AgentState(TypedDict):
     model_used: str
     trace_id: Optional[str]
     guardrails: Dict[str, Any]
+    # Exam paper generation fields
+    exam_paper: str
+    marking_scheme: str
+    weak_areas: Dict[str, Any]
 
 def make_initial_state(student_uid: str) -> AgentState:
     return {
@@ -494,7 +561,11 @@ def make_initial_state(student_uid: str) -> AgentState:
         "processing_time_ms": 0,
         "model_used": "",
         "trace_id": None,
-        "guardrails": {}
+        "guardrails": {},
+        # Exam paper generation fields
+        "exam_paper": "",
+        "marking_scheme": "",
+        "weak_areas": {}
     }
 
 # Neo4j Utilities
@@ -1783,12 +1854,13 @@ class AnalystAgent:
         if GENAI_AVAILABLE:
             logger.info("✅ Google GenAI library available")
         if GEMINI_API_KEY:
-            logger.info("⚠️ Google GEMINI_API_KEY available")
+            api_key_preview = f"{GEMINI_API_KEY[:3]}...{GEMINI_API_KEY[-3:]}" if len(GEMINI_API_KEY) > 6 else "***"
+            logger.info(f"✅ Gemini API key available: {api_key_preview}")
         if GENAI_AVAILABLE and GEMINI_API_KEY:
             try:
                 genai.configure(api_key=GEMINI_API_KEY)
                 self.model = genai.GenerativeModel("gemini-2.5-flash")
-                logger.info("✅ Gemini model initialized")
+                logger.info("✅ AnalystAgent initialized with Gemini model")
             except Exception as e:
                 logger.warning(f"⚠️ Failed to initialize Gemini: {e}")
                 self.model = None
@@ -1978,6 +2050,292 @@ An error occurred during AI analysis: {str(e)}
 
         return state
 
+# Agent 4: Paper Generator (Exam Paper & Marking Scheme)
+class PaperGeneratorAgent:
+    """Agent 4: Generate exam revision papers with marking schemes for 100 marks."""
+
+    def __init__(self):
+        self.model = None
+        if GENAI_AVAILABLE and GEMINI_API_KEY:
+            genai.configure(api_key=GEMINI_API_KEY)
+            self.model = genai.GenerativeModel(
+                DEFAULT_MODEL_NAME,
+                generation_config=genai.GenerationConfig(
+                    temperature=0.7,
+                    top_p=0.9,
+                )
+            )
+            api_key_preview = f"{GEMINI_API_KEY[:3]}...{GEMINI_API_KEY[-3:]}" if len(GEMINI_API_KEY) > 6 else "***"
+            logger.info(f"✅ PaperGeneratorAgent initialized with model ({DEFAULT_MODEL_NAME}) using API key: {api_key_preview}")
+        else:
+            logger.warning("Gemini AI not available for paper generation")
+
+    def _analyze_weak_areas(self, hybrid_context: str) -> dict:
+        """Extract weak areas from hybrid context for targeted question generation."""
+        weak_areas = {
+            "topics": [],
+            "subtopics": [],
+            "concepts": [],
+            "difficulty_gaps": [],
+            "blooms_gaps": []
+        }
+        
+        # Parse hierarchical context to identify weak areas
+        lines = hybrid_context.split('\n')
+        for line in lines:
+            if 'incorrect' in line.lower() and ('topic' in line.lower() or '→' in line):
+                # Extract topic/subtopic/concept from hierarchical lines
+                if '→' in line:
+                    parts = line.split('→')
+                    if len(parts) >= 3:
+                        topic = parts[0].strip().replace('**', '').replace('-', '').strip()
+                        subtopic = parts[1].strip()
+                        concept = parts[2].split('(')[0].strip() if '(' in parts[2] else parts[2].strip()
+                        
+                        if topic and topic not in weak_areas['topics']:
+                            weak_areas['topics'].append(topic)
+                        if subtopic and subtopic not in weak_areas['subtopics']:
+                            weak_areas['subtopics'].append(subtopic)
+                        if concept and concept not in weak_areas['concepts']:
+                            weak_areas['concepts'].append(concept)
+        
+        return weak_areas
+
+    def _build_paper_prompt(self, state: AgentState, weak_areas: dict) -> str:
+        """Build the prompt for AI to generate exam paper with marking scheme."""
+        student_data = state['hybrid_context']
+        
+        # Extract student grade from students_df
+        grade_level = 'Grade 5'  # default
+        if not state['students_df'].empty:
+            grade_level = f"Grade {state['students_df'].iloc[0].get('grade_level', 5)}"
+        
+        # STEP 1: Check if subject was specified in user's original query
+        subject = state.get('subject')
+        if subject:
+            logger.info(f"  📝 Using subject from user query: {subject}")
+        
+        # STEP 2: If not in query, auto-select the weakest subject from performance data
+        elif not state['performance_df'].empty:
+            # Sort by incorrect count (descending) to find weakest subject
+            weakest = state['performance_df'].sort_values('incorrect', ascending=False).iloc[0]
+            subject = weakest['subject']
+            logger.info(f"  🎯 Auto-selected weakest subject for paper: {subject}")
+        
+        # STEP 3: Last resort fallback
+        else:
+            subject = 'General'
+            logger.warning(f"  ⚠️ No subject data available, using fallback: {subject}")
+        
+        weak_concepts = weak_areas.get('concepts', [])
+        weak_topics = weak_areas.get('topics', [])
+        
+        prompt = f"""
+You are an expert educational content creator. Generate a comprehensive exam revision paper for a {grade_level} student.
+
+**CRITICAL REQUIREMENTS:**
+1. **Subject: ONLY {subject.upper()}** (Do NOT include questions from other subjects)
+2. **Total Marks: EXACTLY 100 MARKS** (non-negotiable)
+3. **Format: Question Paper + Detailed Marking Scheme**
+4. **Focus Areas: Target student's weak areas in {subject} while maintaining curriculum balance**
+
+**Student Performance Analysis for {subject}:**
+{student_data}
+
+**Identified Weak Areas in {subject}:**
+- Topics: {', '.join(weak_topics[:5]) if weak_topics else 'Various topics'}
+- Concepts: {', '.join(weak_concepts[:8]) if weak_concepts else 'Various concepts'}
+
+**⚠️ IMPORTANT: ALL QUESTIONS MUST BE FROM {subject.upper()} ONLY**
+
+**Paper Structure Guidelines:**
+- **Section A (40 marks)**: Multiple choice questions (20 questions × 2 marks each)
+  * ALL questions from {subject} curriculum only
+  * 70% from weak areas, 30% from strong areas for confidence building
+  * Mix of difficulty levels (50% easy, 30% medium, 20% challenging)
+  
+- **Section B (30 marks)**: Short answer questions (6 questions × 5 marks each)
+  * ALL questions from {subject} curriculum only
+  * Focus heavily on weak concepts (80%)
+  * Test understanding and application (Bloom's: understand/apply)
+  
+- **Section C (30 marks)**: Long answer questions (3 questions × 10 marks each)
+  * ALL questions from {subject} curriculum only
+  * Target weak topics with comprehensive problems
+  * Test higher-order thinking (Bloom's: analyze/evaluate/create)
+  * Require multi-step solutions
+
+**OUTPUT FORMAT:**
+
+# 📝 {subject} Revision Exam Paper
+**Grade Level:** {grade_level}  
+**Total Marks:** 100  
+**Duration:** 2 hours  
+**Date:** {datetime.now().strftime('%B %d, %Y')}
+
+---
+
+## Instructions for Students:
+1. Answer ALL questions
+2. Write answers in the spaces provided
+3. Show all working for calculation questions
+4. Check your work before submitting
+
+---
+
+## Section A: Multiple Choice Questions (40 marks)
+*Choose the correct answer for each question. Each question carries 2 marks.*
+
+1. [Question targeting weak concept]
+   a) Option A
+   b) Option B  
+   c) Option C
+   d) Option D
+
+[Continue for 20 MCQs...]
+
+---
+
+## Section B: Short Answer Questions (30 marks)
+*Answer all questions. Each question carries 5 marks.*
+
+1. [Question targeting weak subtopic]
+
+[Continue for 6 questions...]
+
+---
+
+## Section C: Long Answer Questions (30 marks)
+*Answer all questions. Show all working. Each question carries 10 marks.*
+
+1. [Comprehensive question targeting weak topic]
+
+[Continue for 3 questions...]
+
+---
+---
+
+# 📋 MARKING SCHEME
+
+## Section A: Multiple Choice Answers (40 marks)
+1. **(c)** [Correct answer] - 2 marks  
+   *Concept tested: [Specific concept]*
+
+[Continue for all 20 MCQs...]
+
+---
+
+## Section B: Short Answer Marking Guide (30 marks)
+
+**Question 1** (5 marks)  
+- **Answer:** [Expected answer]  
+- **Mark allocation:**
+  * [Specific point 1]: 2 marks
+  * [Specific point 2]: 2 marks  
+  * [Accuracy/presentation]: 1 mark
+- **Concept tested:** [Weak concept being addressed]
+
+[Continue for all 6 questions...]
+
+---
+
+## Section C: Long Answer Marking Guide (30 marks)
+
+**Question 1** (10 marks)  
+- **Complete Solution:** [Step-by-step solution]
+- **Mark allocation:**
+  * Understanding/setup: 2 marks
+  * Method/approach: 3 marks
+  * Calculations: 3 marks  
+  * Final answer: 2 marks
+- **Concepts tested:** [List of weak topics/concepts]
+- **Common mistakes to watch:** [Expected errors]
+
+[Continue for all 3 questions...]
+
+---
+
+## Marking Summary
+- Section A: 40 marks (20 × 2)
+- Section B: 30 marks (6 × 5)  
+- Section C: 30 marks (3 × 10)
+- **TOTAL: 100 marks**
+
+---
+
+**Teacher Notes:**
+- Focus areas: {', '.join(weak_concepts[:5]) if weak_concepts else 'Balanced curriculum coverage'}
+- This paper targets identified weak areas while maintaining curriculum breadth
+- Recommended time allocation: Section A (40 min), Section B (40 min), Section C (40 min)
+
+Generate the complete paper now:
+"""
+        return prompt
+
+    @maybe_traceable
+    def generate_exam_paper(self, state: AgentState) -> AgentState:
+        """Generate exam paper with marking scheme for 100 marks."""
+        logger.info("🔄 Agent 4: Generating exam revision paper (100 marks)...")
+        
+        if not self.model:
+            state['exam_paper'] = "Error: AI model not available for paper generation."
+            state['marking_scheme'] = "N/A"
+            state['messages'].append("Agent 4: Failed - AI model unavailable")
+            state['agent_statuses']['paper_generator'] = {'status': 'failed', 'error': 'model_unavailable'}
+            return state
+        
+        if not state.get('evidence_sufficient', False):
+            state['exam_paper'] = "Error: Insufficient student data to generate meaningful exam paper."
+            state['marking_scheme'] = "N/A"
+            state['messages'].append("Agent 4: Failed - Insufficient data")
+            state['agent_statuses']['paper_generator'] = {'status': 'failed', 'error': 'insufficient_data'}
+            return state
+        
+        try:
+            # Analyze weak areas from hybrid context
+            weak_areas = self._analyze_weak_areas(state['hybrid_context'])
+            state['weak_areas'] = weak_areas
+            
+            # Build comprehensive prompt
+            prompt = self._build_paper_prompt(state, weak_areas)
+            
+            # Generate paper with marking scheme
+            response = self.model.generate_content(prompt)
+            full_output = response.text.strip()
+            
+            # Split into question paper and marking scheme
+            if '# 📋 MARKING SCHEME' in full_output:
+                parts = full_output.split('# 📋 MARKING SCHEME', 1)
+                state['exam_paper'] = parts[0].strip()
+                state['marking_scheme'] = '# 📋 MARKING SCHEME\n' + parts[1].strip()
+            else:
+                # Fallback if separator not found
+                state['exam_paper'] = full_output
+                state['marking_scheme'] = "Marking scheme included in paper above."
+            
+            # Combine for analysis_report (full document)
+            state['analysis_report'] = full_output
+            
+            state['messages'].append("Agent 4: Generated 100-mark exam paper with marking scheme")
+            state['agent_statuses']['paper_generator'] = {
+                'status': 'success',
+                'total_marks': 100,
+                'weak_concepts_targeted': len(weak_areas.get('concepts', [])),
+                'model_used': DEFAULT_MODEL_NAME
+            }
+            state['model_used'] = DEFAULT_MODEL_NAME
+            
+            logger.info(f"  ✅ Generated exam paper: 100 marks, {len(weak_areas.get('concepts', []))} weak concepts targeted")
+            
+        except Exception as e:
+            logger.error(f"  ❌ Paper generation failed: {e}")
+            state['exam_paper'] = f"Error generating exam paper: {str(e)}"
+            state['marking_scheme'] = "N/A"
+            state['messages'].append(f"Agent 4: Failed - {str(e)}")
+            state['agent_statuses']['paper_generator'] = {'status': 'failed', 'error': str(e)}
+        
+        return state
+
 # Main Service Class
 class PerformanceReportService:
     """Main service class for generating student performance reports."""
@@ -2031,7 +2389,7 @@ class PerformanceReportService:
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
             """, (
                 student_uid,
-                report_data.get('analysis_report', ''),
+                report_data.get('report_content') or report_data.get('analysis_report', ''),
                 report_data.get('report_format', 'markdown'),
                 json.dumps(report_data.get('agent_statuses', {})),
                 json.dumps(report_data.get('execution_log', [])),
@@ -2167,109 +2525,98 @@ class PerformanceReportService:
 
     def initialize_workflow(self):
         """Initialize the agentic workflow."""
+        if GEMINI_API_KEY and len(GEMINI_API_KEY) > 6:
+            logger.info(f"🔑 Gemini API Key used: {GEMINI_API_KEY[:3]}...{GEMINI_API_KEY[-3:]}")
+
         if self.app is None:
             self.app, self.data_agent = self.create_workflow()
         return self.app, self.data_agent
 
     def create_workflow(self):
-        """Create LangGraph workflow for multi-agent orchestration with retry loop.
-           When PERFORMANCE_REPORT_ISOLATE_ANALYST=true, use a minimal app to run only AnalystAgent for testing.
-        """
-        isolate_flag = os.getenv("PERFORMANCE_REPORT_ISOLATE_ANALYST", "false").lower() == "true"
-
-        try:
-            analyst_agent = AnalystAgent()
-        except Exception as e:
-            logger.error(f"Failed to initialize AnalystAgent: {e}")
-            # Return a minimal no-op app and no data_agent
-            class NoOpApp:
-                def invoke(self, state):
-                    state.setdefault("messages", []).append("AnalystAgent initialization failed")
-                    state["analysis_report"] = "## ⚠️ Analyst initialization failed"
-                    state["evidence_sufficient"] = False
-                    return state
-            return NoOpApp(), None
-
-        if isolate_flag:
-            # Minimal app that exposes an `invoke(state)` method expected by _execute_workflow_steps
-            class SimpleAnalystApp:
-                def invoke(self, state):
-                    # Ensure state has required fields for analysis to run
-                    state.setdefault("messages", [])
-                    try:
-                        # Directly call the analyst to generate the report using existing state
-                        new_state = analyst_agent.generate_report(state)
-                        return new_state
-                    except Exception as e:
-                        logger.error(f"SimpleAnalystApp.invoke failed: {e}")
-                        state.setdefault("errors", []).append({
-                            "step": "analyze",
-                            "message": str(e),
-                            "timestamp": datetime.now().isoformat()
-                        })
-                        state["analysis_report"] = f"## ⚠️ Analysis Error\n\nAn error occurred: {str(e)}"
-                        state["evidence_sufficient"] = False
-                        return state
-
-            app = SimpleAnalystApp()
-            logger.info("✅ Simple workflow created: AnalystAgent only (isolation enabled via env var)")
-            return app, None
-
-        # Normal workflow (LangGraph) creation
+        """Create LangGraph workflow with paper generation support."""
         if not LANGGRAPH_AVAILABLE:
-            logger.warning("⚠️ LangGraph not available, falling back to simplified workflow")
-            data_agent = DataIngesterAgent()
-            data_agent.connect()
-            return "workflow", data_agent
-
+            logger.error("LangGraph not available")
+            return None
+        
+        # Initialize agents
         data_agent = DataIngesterAgent()
         data_agent.connect()
-
-        retriever_agent = RetrieverAgent(data_agent.neo4j_driver, data_agent.embedding_model)
-        # analyst_agent already initialized above
-
+        
+        retriever_agent = RetrieverAgent(
+            neo4j_driver=data_agent.neo4j_driver,
+            embedding_model=data_agent.embedding_model
+        )
+        
+        analyst_agent = AnalystAgent()
+        paper_agent = PaperGeneratorAgent()
+        
+        # Define workflow
         workflow = StateGraph(AgentState)
-
+        
         # Add nodes
         workflow.add_node("extract_data", data_agent.extract_data)
-        workflow.add_node("import_with_embeddings", data_agent.import_to_neo4j_with_embeddings)
-        workflow.add_node("retrieve", retriever_agent.perform_retrieval)
-        workflow.add_node("analyze", analyst_agent.generate_report)
-
-        def should_retry_retrieval(state: AgentState) -> Literal["retrieve", "analyze"]:
-            """Decide whether to retry retrieval or proceed to analysis."""
-            if state["evidence_sufficient"] or state["retrieval_attempt"] >= MAX_RETRIEVAL_RETRIES:
-                return "analyze"
+        workflow.add_node("import_neo4j", data_agent.import_to_neo4j_with_embeddings)
+        workflow.add_node("retrieve_context", retriever_agent.perform_retrieval)
+        workflow.add_node("generate_report", analyst_agent.generate_report)
+        workflow.add_node("generate_answer", analyst_agent.generate_answer)
+        workflow.add_node("generate_paper", paper_agent.generate_exam_paper)
+        
+        # Conditional entry point: Skip data ingestion for QA and paper intents
+        def route_entry(state: AgentState) -> str:
+            intent = state.get("intent", "qa")
+            # Only full reports need data ingestion, QA and paper use existing Neo4j data
+            if intent == "report":
+                return "extract_data"
             else:
-                logger.info(f"🔄 Retrying retrieval (attempt {state['retrieval_attempt'] + 1}/{MAX_RETRIEVAL_RETRIES})")
-                return "retrieve"
-
-        # Set up the workflow edges
-        workflow.set_entry_point("extract_data")
-        workflow.add_edge("extract_data", "import_with_embeddings")
-        workflow.add_edge("import_with_embeddings", "retrieve")
-        workflow.add_edge("analyze", END)
-
-        # Conditional edge from retrieve to either retry or analyze
-        workflow.add_conditional_edges(
-            "retrieve",
-            should_retry_retrieval,
+                # QA and paper intents skip data ingestion, go directly to retrieval
+                return "retrieve_context"
+        
+        workflow.set_conditional_entry_point(
+            route_entry,
             {
-                "retrieve": "retrieve",
-                "analyze": "analyze"
+                "extract_data": "extract_data",
+                "retrieve_context": "retrieve_context"
             }
         )
-
-        app = workflow.compile()
-        logger.info("✅ LangGraph workflow created with retry mechanism")
-        return app, data_agent
+        
+        # Define edges
+        workflow.add_edge("extract_data", "import_neo4j")
+        workflow.add_edge("import_neo4j", "retrieve_context")
+        
+        # Conditional routing based on intent after retrieval
+        def route_after_retrieval(state: AgentState) -> str:
+            intent = state.get("intent", "qa")
+            if intent == "paper":
+                return "generate_paper"
+            elif intent == "report":
+                return "generate_report"
+            else:
+                return "generate_answer"
+        
+        workflow.add_conditional_edges(
+            "retrieve_context",
+            route_after_retrieval,
+            {
+                "generate_paper": "generate_paper",
+                "generate_report": "generate_report",
+                "generate_answer": "generate_answer"
+            }
+        )
+        
+        # All paths end
+        workflow.add_edge("generate_paper", END)
+        workflow.add_edge("generate_report", END)
+        workflow.add_edge("generate_answer", END)
+        
+        return workflow.compile(), data_agent
 
     def _initialize_agents(self):
         data_agent = DataIngesterAgent()
         data_agent.connect()
         retriever_agent = RetrieverAgent(data_agent.neo4j_driver, data_agent.embedding_model)
         analyst_agent = AnalystAgent()
-        return data_agent, retriever_agent, analyst_agent
+        paper_agent = PaperGeneratorAgent()
+        return data_agent, retriever_agent, analyst_agent, paper_agent
 
     @maybe_traceable
     def _run_retrieval_loop(self, state: AgentState, retriever_agent: RetrieverAgent) -> AgentState:
@@ -2298,6 +2645,8 @@ class PerformanceReportService:
 
         if resolved_intent == "report":
             result = self.generate_performance_report(student_uid, admin_key)
+        elif resolved_intent == "paper":
+            result = self.generate_exam_paper(student_uid, subject=subject, admin_key=admin_key, topic=topic)
         else:
             result = self.generate_performance_answer(
                 student_uid,
@@ -2795,6 +3144,141 @@ class PerformanceReportService:
                 except Exception as cleanup_error:
                     logger.warning(f"Error during cleanup: {cleanup_error}")
 
+    def generate_exam_paper(
+        self,
+        student_uid: str,
+        subject: str,
+        admin_key: str = None,
+        topic: Optional[str] = None
+    ) -> dict:
+        """
+        Generate a 100-mark exam paper with marking scheme for a student.
+
+        Args:
+            student_uid: Firebase User UID
+            subject: Subject for the exam paper (REQUIRED)
+            admin_key: Admin key for bypassing cooldown
+            topic: Optional topic filter
+
+        Returns:
+            Dictionary containing the exam paper and marking scheme
+        """
+        start_time = datetime.now()
+        trace_id = None
+        data_agent = None
+
+        # Validate required subject parameter
+        if not subject or not subject.strip():
+            logger.error("❌ Subject is required for exam paper generation")
+            return {
+                "success": False,
+                "student_uid": student_uid,
+                "intent": "paper",
+                "error": "missing_subject",
+                "message": "Subject is required to generate exam paper",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # Log detected subject
+        logger.info(f"📚 Generating exam paper for subject: {subject}")
+
+        try:
+            # Initialize workflow
+            app, data_agent = self.initialize_workflow()
+
+            # Create initial state with paper intent
+            state = make_initial_state(student_uid)
+            state["intent"] = "paper"
+            state["subject"] = subject
+            state["topic"] = topic
+
+            # Execute workflow
+            result_state = self._execute_workflow_steps(state, app, data_agent)
+
+            end_time = datetime.now()
+            processing_time_ms = int((end_time - start_time).total_seconds() * 1000)
+
+            # Check if paper was generated successfully
+            exam_paper = result_state.get("exam_paper", "")
+            marking_scheme = result_state.get("marking_scheme", "")
+            
+            # Only fail if paper is empty or starts with "Error:" (actual error message)
+            # Don't fail if "Error" appears in legitimate content like "Common Errors to Avoid"
+            if not exam_paper or exam_paper.strip().startswith("Error:"):
+                return {
+                    "success": False,
+                    "student_uid": student_uid,
+                    "intent": "paper",
+                    "subject": subject,
+                    "topic": topic,
+                    "error": "paper_generation_failed",
+                    "message": exam_paper or "Failed to generate exam paper",
+                    "evidence_sufficient": result_state.get("evidence_sufficient", False),
+                    "evidence_quality_score": result_state.get("evidence_quality_score", 0.0),
+                    "processing_time_ms": processing_time_ms,
+                    "model_used": result_state.get("model_used", ""),
+                    "timestamp": end_time.isoformat()
+                }
+
+            # Save to database
+            report_data = {
+                "report_content": exam_paper + "\n\n" + marking_scheme,
+                "report_format": "paper",
+                "agent_statuses": result_state.get("agent_statuses", {}),
+                "execution_log": result_state.get("messages", []),
+                "evidence_quality_score": result_state.get("evidence_quality_score", 0.0),
+                "retrieval_attempts": result_state.get("retrieval_attempt", 0),
+                "success": True,
+                "processing_time_ms": processing_time_ms,
+                "model_used": result_state.get("model_used", "")
+            }
+            
+            save_success = self.save_performance_report(student_uid, report_data)
+
+            return {
+                "success": True,
+                "student_uid": student_uid,
+                "intent": "paper",
+                "subject": subject,
+                "topic": topic,
+                "exam_paper": exam_paper,
+                "marking_scheme": marking_scheme,
+                "total_marks": 100,
+                "weak_concepts_targeted": len(result_state.get("weak_areas", {}).get("concepts", [])),
+                "evidence_sufficient": result_state.get("evidence_sufficient", False),
+                "evidence_quality_score": result_state.get("evidence_quality_score", 0.0),
+                "retrieval_attempts": result_state.get("retrieval_attempt", 0),
+                "processing_time_ms": processing_time_ms,
+                "model_used": result_state.get("model_used", ""),
+                "saved_to_database": save_success,
+                "timestamp": end_time.isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"Error generating exam paper: {e}")
+            end_time = datetime.now()
+            processing_time_ms = int((end_time - start_time).total_seconds() * 1000)
+            
+            return {
+                "success": False,
+                "student_uid": student_uid,
+                "intent": "paper",
+                "subject": subject,
+                "topic": topic,
+                "error": "exception",
+                "message": str(e),
+                "processing_time_ms": processing_time_ms,
+                "timestamp": end_time.isoformat()
+            }
+
+        finally:
+            # Clean up connections
+            if data_agent is not None:
+                try:
+                    data_agent.close()
+                except Exception as cleanup_error:
+                    logger.warning(f"Error during cleanup: {cleanup_error}")
+
     def _execute_workflow_steps(self, state: AgentState, app, data_agent) -> dict:
         try:
             # Initialize workflow progress
@@ -2820,7 +3304,11 @@ class PerformanceReportService:
                 "agent_statuses": final_state["agent_statuses"],
                 "workflow_progress": final_state["workflow_progress"],
                 "model_used": final_state["model_used"],
-                "trace_id": final_state.get("trace_id")
+                "trace_id": final_state.get("trace_id"),
+                # Include exam paper fields
+                "exam_paper": final_state.get("exam_paper", ""),
+                "marking_scheme": final_state.get("marking_scheme", ""),
+                "weak_areas": final_state.get("weak_areas", {})
             }
 
         except Exception as e:
