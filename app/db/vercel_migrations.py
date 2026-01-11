@@ -245,6 +245,24 @@ class VercelMigrationManager:
                 """)
                 promo_code_exists = cursor.fetchone()[0]
             
+            # Check if google_play_purchases table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'google_play_purchases'
+                )
+            """)
+            google_play_purchases_exists = cursor.fetchone()[0]
+            
+            # Check if subscription_history table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'subscription_history'
+                )
+            """)
+            subscription_history_exists = cursor.fetchone()[0]
+            
             cursor.close()
             conn.close()
             
@@ -283,10 +301,14 @@ class VercelMigrationManager:
                 'log_type_exists': log_type_exists,
                 'performance_reports_exists': performance_reports_exists,
                 'promo_code_exists': promo_code_exists,
+                'google_play_purchases_exists': google_play_purchases_exists,
+                'subscription_history_exists': subscription_history_exists,
                 'needs_migration': (
-                    current_version != '019' or  # Updated to latest version
+                    current_version != '020' or  # Updated to latest version
                     not performance_reports_exists or
                     not promo_code_exists or
+                    not google_play_purchases_exists or
+                    not subscription_history_exists or
                     not notes_column_exists or 
                     not level_column_exists or
                     not prompts_table_exists or
@@ -401,12 +423,20 @@ class VercelMigrationManager:
             promo_code_result = self.apply_migration_019()
             logger.info(f"Promo code migration result: {promo_code_result['message']}")
             
+            # Migration 020: Add Google Play billing tables
+            billing_tables_result = self.apply_migration_020()
+            logger.info(f"Google Play billing tables migration result: {billing_tables_result['message']}")
+            
+            # Migration 021: Add credit expiry tracking
+            credit_expiry_result = self.apply_migration_021()
+            logger.info(f"Credit expiry tracking migration result: {credit_expiry_result['message']}")
+            
             # Verify the migration was successful
             status = self.check_migration_status()
             
             return {
                 'success': True,
-                'message': 'All migrations applied successfully (including LLM models tracking)',
+                'message': 'All migrations applied successfully (including Google Play billing)',
                 'final_status': status,
                 'migrations_applied': [
                     'Base tables (attempts, question_patterns, users)',
@@ -431,7 +461,9 @@ class VercelMigrationManager:
                     'Attempt ID in knowledge usage log',
                     'Quiz session ID in knowledge usage log',
                     'Question number in knowledge usage log',
-                    'Promo code column on users table'
+                    'Promo code column on users table',
+                    'Google Play purchases table',
+                    'Subscription history table'
                 ]
             }
             
@@ -2142,8 +2174,216 @@ class VercelMigrationManager:
                 'success': False,
                 'error': str(e)
             }
+    
+    def apply_migration_020(self) -> Dict[str, Any]:
+        """
+        Apply migration 020: Add Google Play billing tables.
+        
+        Creates two tables for Google Play billing integration:
+        1. google_play_purchases - Tracks all purchases (subscriptions + one-time products)
+        2. subscription_history - Logs subscription status changes and credit grants
+        """
+        try:
+            conn = self.db_provider._get_connection()
+            cursor = conn.cursor()
+            messages = []
+            
+            # Check if google_play_purchases table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'google_play_purchases'
+                )
+            """)
+            google_play_purchases_exists = cursor.fetchone()[0]
+            
+            if not google_play_purchases_exists:
+                # Create google_play_purchases table
+                cursor.execute("""
+                    CREATE TABLE google_play_purchases (
+                        id SERIAL PRIMARY KEY,
+                        uid VARCHAR NOT NULL,
+                        purchase_token TEXT NOT NULL UNIQUE,
+                        product_id VARCHAR(100) NOT NULL,
+                        order_id VARCHAR(100),
+                        purchase_time TIMESTAMPTZ NOT NULL,
+                        purchase_state INTEGER NOT NULL DEFAULT 0,
+                        acknowledged BOOLEAN NOT NULL DEFAULT FALSE,
+                        auto_renewing BOOLEAN,
+                        raw_receipt JSONB,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                messages.append("Created google_play_purchases table")
+                logger.info("Created google_play_purchases table")
+                
+                # Create indexes
+                cursor.execute("CREATE INDEX ix_google_play_purchases_uid ON google_play_purchases(uid)")
+                cursor.execute("CREATE INDEX ix_google_play_purchases_product_id ON google_play_purchases(product_id)")
+                cursor.execute("CREATE INDEX ix_google_play_purchases_order_id ON google_play_purchases(order_id)")
+                cursor.execute("CREATE INDEX ix_google_play_purchases_purchase_time ON google_play_purchases(purchase_time)")
+                messages.append("Created indexes on google_play_purchases table")
+                
+                # Add foreign key constraint
+                cursor.execute("""
+                    ALTER TABLE google_play_purchases 
+                    ADD CONSTRAINT fk_google_play_purchases_uid 
+                    FOREIGN KEY (uid) REFERENCES users(uid) ON DELETE CASCADE
+                """)
+                messages.append("Added foreign key constraint to google_play_purchases")
+            else:
+                messages.append("google_play_purchases table already exists")
+            
+            # Check if subscription_history table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'subscription_history'
+                )
+            """)
+            subscription_history_exists = cursor.fetchone()[0]
+            
+            if not subscription_history_exists:
+                # Create subscription_history table
+                cursor.execute("""
+                    CREATE TABLE subscription_history (
+                        id SERIAL PRIMARY KEY,
+                        uid VARCHAR NOT NULL,
+                        purchase_id INTEGER,
+                        event VARCHAR(50) NOT NULL,
+                        old_subscription INTEGER,
+                        new_subscription INTEGER,
+                        credits_granted INTEGER DEFAULT 0,
+                        performed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        notes TEXT
+                    )
+                """)
+                messages.append("Created subscription_history table")
+                logger.info("Created subscription_history table")
+                
+                # Create indexes
+                cursor.execute("CREATE INDEX ix_subscription_history_uid ON subscription_history(uid)")
+                cursor.execute("CREATE INDEX ix_subscription_history_event ON subscription_history(event)")
+                cursor.execute("CREATE INDEX ix_subscription_history_performed_at ON subscription_history(performed_at)")
+                messages.append("Created indexes on subscription_history table")
+                
+                # Add foreign key constraints
+                cursor.execute("""
+                    ALTER TABLE subscription_history 
+                    ADD CONSTRAINT fk_subscription_history_uid 
+                    FOREIGN KEY (uid) REFERENCES users(uid) ON DELETE CASCADE
+                """)
+                cursor.execute("""
+                    ALTER TABLE subscription_history 
+                    ADD CONSTRAINT fk_subscription_history_purchase_id 
+                    FOREIGN KEY (purchase_id) REFERENCES google_play_purchases(id) ON DELETE SET NULL
+                """)
+                messages.append("Added foreign key constraints to subscription_history")
+            else:
+                messages.append("subscription_history table already exists")
+            
+            # Update migration version to 020
+            cursor.execute("""
+                DELETE FROM alembic_version WHERE version_num IN ('020', '019', '018', '017', '016', '015', '014', '013', '012', '011', '010', '009', '008', '007', '2d3eefae954c')
+            """)
+            cursor.execute("""
+                INSERT INTO alembic_version (version_num) VALUES ('020')
+                ON CONFLICT (version_num) DO NOTHING
+            """)
+            messages.append("Updated alembic version to 020")
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            return {
+                'success': True,
+                'message': '; '.join(messages) if messages else 'Migration 020 already applied'
+            }
+        
+        except Exception as e:
+            logger.error(f"Error in migration 020: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    def apply_migration_021(self) -> Dict[str, Any]:
+        """
+        Migration 021: Add credit expiry tracking for premium subscriptions
+        - Adds credits_expire_at column to users table
+        - Adds expiry_date column to subscription_history table
+        """
+        try:
+            conn = self.db_provider._get_connection()
+            cursor = conn.cursor()
+            messages = []
+            
+            # Check if credits_expire_at column exists on users table
+            cursor.execute("""
+                SELECT column_name FROM information_schema.columns 
+                WHERE table_name = 'users' AND column_name = 'credits_expire_at'
+            """)
+            credits_expire_at_exists = cursor.fetchone() is not None
+            
+            if not credits_expire_at_exists:
+                cursor.execute("ALTER TABLE users ADD COLUMN credits_expire_at TIMESTAMP DEFAULT NULL")
+                messages.append("Added credits_expire_at column to users table")
+                logger.info("Added credits_expire_at column to users table")
+                
+                # Add index for efficient expiry queries
+                cursor.execute("""
+                    CREATE INDEX idx_users_credits_expire_at 
+                    ON users(credits_expire_at) 
+                    WHERE credits_expire_at IS NOT NULL
+                """)
+                messages.append("Created index on credits_expire_at")
+            else:
+                messages.append("credits_expire_at column already exists on users table")
+            
+            # Check if expiry_date column exists on subscription_history table
+            cursor.execute("""
+                SELECT column_name FROM information_schema.columns 
+                WHERE table_name = 'subscription_history' AND column_name = 'expiry_date'
+            """)
+            expiry_date_exists = cursor.fetchone() is not None
+            
+            if not expiry_date_exists:
+                cursor.execute("ALTER TABLE subscription_history ADD COLUMN expiry_date TIMESTAMP DEFAULT NULL")
+                messages.append("Added expiry_date column to subscription_history table")
+                logger.info("Added expiry_date column to subscription_history table")
+            else:
+                messages.append("expiry_date column already exists on subscription_history table")
+            
+            # Update migration version to 021
+            cursor.execute("""
+                DELETE FROM alembic_version WHERE version_num = '021'
+            """)
+            cursor.execute("""
+                INSERT INTO alembic_version (version_num) VALUES ('021')
+                ON CONFLICT (version_num) DO NOTHING
+            """)
+            messages.append("Updated alembic version to 021")
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            return {
+                'success': True,
+                'message': '; '.join(messages) if messages else 'Migration 021 already applied'
+            }
+        
+        except Exception as e:
+            logger.error(f"Error in migration 021: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
 
 
 # Global instance
 migration_manager = VercelMigrationManager()
+
 

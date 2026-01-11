@@ -5,6 +5,14 @@ from app.services.ai_service import generate_practice_questions
 from app.services.prompt_service import PromptService
 from app.services.user_blocking_service import UserBlockingService
 from app.services.performance_report_service import performance_report_service
+from app.services.billing_service import billing_service
+from app.validators.billing_validators import (
+    VerifyPurchaseRequest, VerifyPurchaseResponse,
+    ProcessPurchaseRequest, ProcessPurchaseResponse,
+    GooglePlayWebhookRequest,
+    UpdateSubscriptionRequest, UpdateSubscriptionResponse,
+    GetPurchaseHistoryResponse
+)
 from app.repositories import db_service
 from app.db.vercel_migrations import migration_manager
 from app.db.models import get_session
@@ -51,6 +59,7 @@ async def get_user(uid: str):
         # Get subscription level and credits
         subscription = user_data.get("subscription", 0)
         credits = user_data.get("credits", 0)
+        credits_expire_at = user_data.get("credits_expire_at")
         
         # Initialize prompt service to get daily usage
         prompt_service = PromptService()
@@ -69,6 +78,7 @@ async def get_user(uid: str):
             "gradeLevel": user_data["grade_level"],
             "subscription": subscription,
             "credits": credits,
+            "credits_expire_at": credits_expire_at.isoformat() if credits_expire_at else None,
             "registrationDate": user_data["registration_date"],
             "daily_count": daily_count,
             "daily_limit": max_daily,
@@ -409,6 +419,393 @@ async def get_user_credit_usage(
     except Exception as e:
         logger.error(f"Error getting credit usage for {user_uid}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get credit usage: {str(e)}")
+
+
+# ============================================================================
+# Google Play Billing Endpoints
+# ============================================================================
+
+@router.post("/billing/verify-purchase", response_model=VerifyPurchaseResponse)
+async def verify_purchase(
+    request: VerifyPurchaseRequest,
+    uid: str = Header(..., description="Firebase User UID")
+):
+    """
+    Verify a Google Play purchase with Google's servers
+    
+    Args:
+        request: Purchase verification request with product_id, purchase_token, product_type
+        uid: Firebase User UID from header
+    
+    Returns:
+        Verification result with purchase_id if successful
+    """
+    try:
+        # Verify with Google Play
+        if request.product_type == 'subscription':
+            is_valid, purchase_data, error = billing_service.verify_subscription_purchase(
+                request.product_id,
+                request.purchase_token
+            )
+        else:  # product
+            is_valid, purchase_data, error = billing_service.verify_product_purchase(
+                request.product_id,
+                request.purchase_token
+            )
+        
+        if not is_valid:
+            return VerifyPurchaseResponse(
+                success=False,
+                is_valid=False,
+                error=error or "Purchase verification failed",
+                message="Invalid purchase"
+            )
+        
+        # Save purchase record
+        auto_renewing = purchase_data.get('auto_renewing') if request.product_type == 'subscription' else None
+        purchase_id = billing_service.save_purchase_record(
+            uid=uid,
+            product_id=request.product_id,
+            purchase_token=request.purchase_token,
+            purchase_data=purchase_data,
+            auto_renewing=auto_renewing
+        )
+        
+        logger.info(f"Purchase verified for user {uid}: {request.product_id} (purchase_id: {purchase_id})")
+        
+        return VerifyPurchaseResponse(
+            success=True,
+            is_valid=True,
+            purchase_id=purchase_id,
+            message="Purchase verified successfully"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error verifying purchase: {e}")
+        return VerifyPurchaseResponse(
+            success=False,
+            is_valid=False,
+            error=str(e),
+            message="Failed to verify purchase"
+        )
+
+
+@router.post("/billing/process-purchase", response_model=ProcessPurchaseResponse)
+async def process_purchase(
+    request: ProcessPurchaseRequest,
+    uid: str = Header(..., description="Firebase User UID")
+):
+    """
+    Process a verified purchase - grant subscription or credits
+    
+    Args:
+        request: Process request with purchase_id
+        uid: Firebase User UID from header
+    
+    Returns:
+        Processing result with updated subscription/credits
+    """
+    try:
+        # Get purchase details from database
+        conn = DatabaseFactory.get_provider()._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT product_id, uid FROM google_play_purchases WHERE id = %s
+        """, (request.purchase_id,))
+        
+        result = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if not result:
+            raise HTTPException(status_code=404, detail="Purchase not found")
+        
+        product_id, purchase_uid = result
+        
+        # Verify purchase belongs to requesting user
+        if purchase_uid != uid:
+            raise HTTPException(status_code=403, detail="Purchase does not belong to this user")
+        
+        # Determine if it's a subscription or credit pack
+        from app.services.billing_service import SKU_TO_SUBSCRIPTION_LEVEL, SKU_TO_CREDIT_AMOUNT
+        
+        if product_id in SKU_TO_SUBSCRIPTION_LEVEL:
+            # Process subscription
+            process_result = billing_service.process_subscription_purchase(
+                uid=uid,
+                product_id=product_id,
+                purchase_id=request.purchase_id
+            )
+            
+            return ProcessPurchaseResponse(
+                success=True,
+                old_subscription=process_result['old_subscription'],
+                new_subscription=process_result['new_subscription'],
+                credits_granted=0,
+                message=f"Subscription activated: {product_id}"
+            )
+            
+        elif product_id in SKU_TO_CREDIT_AMOUNT:
+            # Process credit pack
+            process_result = billing_service.process_credit_pack_purchase(
+                uid=uid,
+                product_id=product_id,
+                purchase_id=request.purchase_id
+            )
+            
+            return ProcessPurchaseResponse(
+                success=True,
+                old_credits=process_result['old_credits'],
+                new_credits=process_result['new_credits'],
+                credits_granted=process_result['credits_granted'],
+                message=f"Credits added: {product_id}"
+            )
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown product: {product_id}")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing purchase: {e}")
+        return ProcessPurchaseResponse(
+            success=False,
+            credits_granted=0,
+            error=str(e),
+            message="Failed to process purchase"
+        )
+
+
+@router.post("/billing/google-play-webhook")
+async def google_play_webhook(request: GooglePlayWebhookRequest):
+    """
+    Handle Google Play Real-time Developer Notifications
+    
+    Processes subscription renewals, cancellations, and other events
+    """
+    try:
+        logger.info(f"Received Google Play webhook: {request.dict()}")
+        
+        # Handle subscription notifications
+        if request.subscriptionNotification:
+            notification = request.subscriptionNotification
+            notification_type = notification.get('notificationType')
+            purchase_token = notification.get('purchaseToken')
+            
+            # Find purchase in database
+            conn = DatabaseFactory.get_provider()._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, uid, product_id FROM google_play_purchases 
+                WHERE purchase_token = %s
+            """, (purchase_token,))
+            
+            result = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if not result:
+                logger.warning(f"Purchase not found for webhook token: {purchase_token}")
+                return {"status": "ok", "message": "Purchase not found"}
+            
+            purchase_id, uid, product_id = result
+            
+            # Handle different notification types
+            # 1 = SUBSCRIPTION_RECOVERED
+            # 2 = SUBSCRIPTION_RENEWED
+            # 3 = SUBSCRIPTION_CANCELED
+            # 4 = SUBSCRIPTION_PURCHASED
+            # 5 = SUBSCRIPTION_ON_HOLD
+            # 6 = SUBSCRIPTION_IN_GRACE_PERIOD
+            # 7 = SUBSCRIPTION_RESTARTED
+            # 8 = SUBSCRIPTION_PRICE_CHANGE_CONFIRMED
+            # 9 = SUBSCRIPTION_DEFERRED
+            # 10 = SUBSCRIPTION_PAUSED
+            # 11 = SUBSCRIPTION_PAUSE_SCHEDULE_CHANGED
+            # 12 = SUBSCRIPTION_REVOKED
+            # 13 = SUBSCRIPTION_EXPIRED
+            
+            if notification_type in [3, 12, 13]:  # Cancelled, Revoked, or Expired
+                billing_service.cancel_subscription(
+                    uid=uid,
+                    purchase_id=purchase_id,
+                    reason=f"Google Play notification type {notification_type}"
+                )
+                logger.info(f"Subscription cancelled for user {uid}")
+            
+            elif notification_type in [1, 2, 4, 7]:  # Recovered, Renewed, Purchased, or Restarted
+                # Re-activate subscription if needed
+                from app.services.billing_service import SKU_TO_SUBSCRIPTION_LEVEL
+                subscription_level = SKU_TO_SUBSCRIPTION_LEVEL.get(product_id)
+                
+                if subscription_level:
+                    # Update subscription level
+                    conn = DatabaseFactory.get_provider()._get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        UPDATE users SET subscription = %s WHERE uid = %s
+                    """, (subscription_level, uid))
+                    
+                    # Log history
+                    cursor.execute("""
+                        INSERT INTO subscription_history 
+                        (uid, purchase_id, event, new_subscription, credits_granted, notes)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """, (uid, purchase_id, 'RENEWED', subscription_level, 0, 
+                          f"Google Play notification type {notification_type}"))
+                    
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+                    
+                    logger.info(f"Subscription renewed for user {uid}")
+        
+        # Handle one-time product notifications
+        elif request.oneTimeProductNotification:
+            logger.info(f"One-time product notification: {request.oneTimeProductNotification}")
+        
+        return {"status": "ok", "message": "Webhook processed"}
+        
+    except Exception as e:
+        logger.error(f"Error processing Google Play webhook: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/admin/users/{user_uid}/subscription", response_model=UpdateSubscriptionResponse)
+async def update_user_subscription(
+    user_uid: str,
+    request: UpdateSubscriptionRequest,
+    admin_key: str = ""
+):
+    """
+    Manually update a user's subscription level (admin only)
+    
+    Args:
+        user_uid: Firebase User UID
+        request: Subscription update request
+        admin_key: Admin authentication key
+    
+    Returns:
+        Subscription update result
+    """
+    # Verify admin access
+    expected_key = os.getenv('ADMIN_KEY', 'dev-admin-key')
+    if admin_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+    
+    try:
+        # Check if user exists
+        user_data = db_service.get_user_by_uid(user_uid)
+        if not user_data:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        old_subscription = user_data.get('subscription', 0)
+        
+        # Update subscription
+        conn = DatabaseFactory.get_provider()._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            UPDATE users 
+            SET subscription = %s 
+            WHERE uid = %s
+        """, (request.subscription_level, user_uid))
+        
+        # Log subscription history
+        cursor.execute("""
+            INSERT INTO subscription_history 
+            (uid, purchase_id, event, old_subscription, new_subscription, credits_granted, notes)
+            VALUES (%s, NULL, %s, %s, %s, %s, %s)
+        """, (
+            user_uid,
+            'MANUAL',
+            old_subscription,
+            request.subscription_level,
+            0,
+            request.reason or 'Manual admin update'
+        ))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        logger.info(f"Admin updated subscription for {user_uid}: {old_subscription} -> {request.subscription_level}")
+        
+        return UpdateSubscriptionResponse(
+            success=True,
+            uid=user_uid,
+            old_subscription=old_subscription,
+            new_subscription=request.subscription_level,
+            message=f"Subscription updated from {old_subscription} to {request.subscription_level}"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating subscription for {user_uid}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update subscription: {str(e)}")
+
+
+@router.post("/admin/expire-credits")
+async def expire_credits_admin(
+    admin_key: str = Header(..., description="Admin API key")
+):
+    """
+    Admin endpoint to manually trigger credit expiry cleanup
+    Expires credits for all users whose credits_expire_at has passed
+    """
+    try:
+        # Verify admin key
+        expected_key = os.getenv("ADMIN_API_KEY", "dev-admin-key")
+        if admin_key != expected_key:
+            raise HTTPException(status_code=403, detail="Invalid admin key")
+        
+        from app.services.credit_expiry_service import credit_expiry_service
+        
+        # Expire credits
+        result = credit_expiry_service.expire_credits()
+        
+        if result['success']:
+            return {
+                "success": True,
+                "expired_count": result['expired_count'],
+                "message": result['message']
+            }
+        else:
+            raise HTTPException(status_code=500, detail=result.get('error', 'Failed to expire credits'))
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in expire credits admin endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to expire credits: {str(e)}")
+
+
+@router.get("/billing/purchases/{user_uid}", response_model=GetPurchaseHistoryResponse)
+async def get_purchase_history(
+    user_uid: str,
+    limit: int = 50
+):
+    """
+    Get user's purchase history
+    
+    Args:
+        user_uid: Firebase User UID
+        limit: Maximum number of purchases to return
+    
+    Returns:
+        List of user's purchases
+    """
+    try:
+        purchases = billing_service.get_user_purchases(user_uid, limit)
+        
+        return GetPurchaseHistoryResponse(
+            purchases=purchases,
+            count=len(purchases)
+        )
+        
+    except Exception as e:
+        logger.error(f"Error getting purchase history for {user_uid}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get purchase history: {str(e)}")
 
 
 # ============================================================================
@@ -2226,7 +2623,7 @@ async def generate_performance_report(student_uid: str, admin_key: str = Header(
                     status_code=429,  # Too Many Requests
                     detail={
                         "error": "daily_limit_exceeded",
-                        "message": "SmartBoy Limit: Performance report can only be generated once every 24 hours",
+                        "message": "SmartBoy Limit: Only a Single Performance report be generated",
                         "cooldown_remaining": result.get("cooldown_remaining", 0),
                         "cooldown_end": result.get("cooldown_end"),
                         "student_uid": student_uid
@@ -2273,7 +2670,7 @@ async def query_performance_report(student_uid: str, request: PerformanceReportQ
                         "error": "daily_limit_exceeded",
                         "message": result.get(
                             "message",
-                            "SmartBoy Limit: Performance report can only be generated once every 24 hours"
+                            "SmartBoy Limit: Only a Single Performance report be generated"
                         ),
                         "cooldown_remaining": result.get("cooldown_remaining", 0),
                         "cooldown_end": result.get("cooldown_end"),
