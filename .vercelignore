@@ -1,7 +1,9 @@
+# Virtual environment and Python bytecode (existing)
 .venv/
 Include/
 Lib/
 Scripts/
+share/
 __pycache__/
 *.pyc
 *.pyo
@@ -11,3 +13,66 @@ __pycache__/
 *.db
 .coverage
 test*.py
+
+# Development and testing directories
+tests/
+docs/
+py/
+tools/
+client/
+html/
+migrations/
+
+# Development scripts and configs
+*.ps1
+*.md
+Dockerfile
+README.md
+pytest.ini
+pyvenv.cfg
+*.code-workspace
+
+# Environment files
+.env
+.env.*
+.env.local
+.env.development
+.env.production
+
+# Version control and IDE
+.git/
+.github/
+.gitignore
+.vscode/
+.prompts/
+desktop.ini
+
+# Build and deployment artifacts
+*.7z
+*.zip
+*.tar.gz
+
+# Media and documentation files
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.wsd
+*.pdf
+*.der
+privacy-policy.html
+
+# Specific large files
+en_files_pswd_firs_cat.7z
+image.png
+
+# Jupyter and Colab
+*.ipynb
+.ipynb_checkpoints/
+
+# Additional Python artifacts
+*.egg-info/
+dist/
+build/
+*.egg
