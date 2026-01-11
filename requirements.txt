@@ -8,13 +8,14 @@ psycopg2-binary
 alembic
 sqlalchemy
 requests
-neo4j
-pandas
-langgraph
-google-genai
+# neo4j
+# pandas
+# langgraph
+# google-genai
 google-api-python-client
 google-auth
 google-auth-oauthlib
 google-auth-httplib2
-#sentence-transformers
-langsmith
+# sentence-transformers  # Optional: only needed when EMBEDDING_PROVIDER=local
+# huggingface-hub>=0.20.0
+# langsmith
