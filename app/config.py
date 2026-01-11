@@ -29,7 +29,7 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "")
 # AI Bridge settings (Primary Model)
 AI_BRIDGE_BASE_URL = os.getenv("FORGE_BASE_URL", "https://api.forge.tensorblock.co/v1")
 AI_BRIDGE_API_KEY = os.getenv("FORGE_API_KEY", "")
-AI_BRIDGE_MODEL = os.getenv("FORGE_AI_MODEL", "Gemini/models/gemini-2.0-flash") #OpenRouter/qwen/qwen3-4b:free
+AI_BRIDGE_MODEL = os.getenv("FORGE_AI_MODEL", "Gemini/models/gemini-2.5-flash") #OpenRouter/qwen/qwen3-4b:free
 
 # Fallback AI Model settings (used when primary model fails)
 AI_FALLBACK_MODEL_1 = os.getenv("FORGE_FALLBACK_MODEL_1", "Groq/llama-3.3-70b-versatile")
@@ -80,3 +80,11 @@ FF_HELP_VISUAL_JSON_MAX = int(os.getenv("FF_HELP_VISUAL_JSON_MAX", "3"))
 # AI-generated SVG (complete SVG element from AI, experimental)
 FF_HELP_VISUAL_SVG_FROM_AI_ENABLED = os.getenv("FF_HELP_VISUAL_SVG_FROM_AI_ENABLED", "false").lower() == "true"
 FF_HELP_VISUAL_SVG_FROM_AI_MAX = int(os.getenv("FF_HELP_VISUAL_SVG_FROM_AI_MAX", "1"))
+
+# === Google Play Billing Configuration ===
+# Service account JSON for verifying Google Play purchases (base64 encoded)
+GOOGLE_PLAY_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON", "")
+GOOGLE_PLAY_PACKAGE_NAME = os.getenv("GOOGLE_PLAY_PACKAGE_NAME", "tuanorg.smartboy")
+
+# Admin key for administrative endpoints
+ADMIN_KEY = os.getenv("ADMIN_KEY", "dev-admin-key")

@@ -10,6 +10,11 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+# Suppress noisy logs from libraries
+logging.getLogger("neo4j").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 app = FastAPI(title="Math Learning API")
 
 # Configure CORS
