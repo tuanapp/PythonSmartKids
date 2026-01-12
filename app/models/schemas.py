@@ -107,13 +107,6 @@ class EvaluateAnswersRequest(BaseModel):
     evaluations: List[AnswerEvaluation]
 
 
-class PerformanceReportQueryRequest(BaseModel):
-    """Request body for performance report Q&A"""
-    query: str = Field(..., min_length=3, max_length=500)
-    subject_id: Optional[int] = None
-    limit: int = Field(default=5, ge=1, le=20)
-
-
 class AnswerEvaluationResult(BaseModel):
     """Result of evaluating a single answer"""
     question_id: Optional[str] = None

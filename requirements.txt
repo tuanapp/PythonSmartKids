@@ -5,17 +5,17 @@ pydantic
 python-dotenv
 # python-multipart
 psycopg2-binary
-# alembic
+alembic
 sqlalchemy
 requests
-neo4j
+# neo4j  # Moved to Agentic_Python
 # pandas
-langgraph
+# langgraph  # Moved to Agentic_Python
 # google-genai
 google-api-python-client
-# google-auth
-# google-auth-oauthlib
-# google-auth-httplib2
-# sentence-transformers  # Optional: only needed when EMBEDDING_PROVIDER=local
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+# sentence-transformers  # Moved to Agentic_Python - Optional: only needed when EMBEDDING_PROVIDER=local
 # huggingface-hub>=0.20.0
-# langsmith
+# langsmith  # Moved to Agentic_Python
