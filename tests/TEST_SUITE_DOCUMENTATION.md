@@ -379,6 +379,6 @@ AssertionError: Expected 0 prompts, found 3
 ## Related Documentation
 
 - `ARCHITECTURE_SIMPLIFICATION_SUMMARY.md` - Migration 008 details
-- `SUBSCRIPTION_TESTING.md` - Manual subscription testing guide
+- `docs/subscription_and_billing/SUBSCRIPTION_TESTING.md` - Manual subscription testing guide
 - `Backend_Python/app/services/prompt_service.py` - Daily limit implementation
 - `Backend_Python/app/api/routes.py` - API endpoint implementation
