@@ -82,6 +82,7 @@ app/
 │
 ├── services/
 │   ├── ai_service.py    # AI/LLM integration
+│   ├── llm_service.py   # Multi-provider LLM management
 │   ├── prompt_service.py # Prompt tracking & limits
 │   └── user_blocking_service.py
 │
@@ -231,6 +232,78 @@ class UserBlockingMiddleware:
             return JSONResponse(status_code=403, ...)
         return await call_next(request)
 ```
+
+### 5. Multi-Provider LLM Service (Migration 012)
+
+**Problem**: Need flexible AI model management with multiple providers (Google, Groq, Anthropic).
+
+**Solution**: Database-driven model configuration with automatic Forge API routing.
+
+**Architecture**:
+```
+AI Request → get_models_to_try() → Ordered Model List → Forge API → Provider (Google/Groq)
+                                         ↓
+                                   llm_models table
+                                   (order_number)
+```
+
+**Provider Configuration** (`llm_service.py`):
+```python
+SUPPORTED_PROVIDERS = {
+    'google': {
+        'forge_prefix': 'tensorblock',  # Forge routes to Google
+        'api_url': 'https://generativelanguage.googleapis.com/...'
+    },
+    'groq': {
+        'forge_prefix': 'Groq',  # Forge routes to Groq
+        'api_url': 'https://api.groq.com/...'
+    }
+}
+```
+
+**Database-Driven Model Selection**:
+```sql
+-- Models ordered by priority
+SELECT model_name, provider FROM llm_models
+WHERE active = TRUE AND deprecated = FALSE
+ORDER BY order_number ASC
+-- Returns: [('llama-3.3-70b-versatile', 'groq'), ('gemini-2.0-flash', 'google'), ...]
+```
+
+**Forge API Format**:
+```python
+# DB: model_name='llama-3.3-70b-versatile', provider='groq'
+# Formatted as: 'Groq/llama-3.3-70b-versatile'
+
+# DB: model_name='gemini-2.0-flash', provider='google'  
+# Formatted as: 'tensorblock/gemini-2.0-flash'
+```
+
+**Model Fallback Chain**:
+1. Try models in `order_number` sequence
+2. If all fail, use `FORGE_FALLBACK_MODEL_1` (env var)
+3. Return error if all options exhausted
+
+**Benefits**:
+- **Zero code changes** to add new models - just database config
+- **Automatic failover** between providers
+- **Centralized model management** via admin API
+- **24-hour caching** to minimize DB queries
+- **API sync** to auto-update available models
+
+**Admin Operations**:
+```bash
+# Sync models from provider API
+POST /admin/sync-llm-models?provider=groq&admin_key=KEY
+
+# Get all models
+GET /llm-models
+
+# Update model priority
+PUT /admin/llm-model/{model_name}
+```
+
+See [GROQ_INTEGRATION.md](../../docs/GROQ_INTEGRATION.md) for complete provider integration guide.
 
 ---
 
