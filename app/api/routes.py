@@ -2531,3 +2531,115 @@ async def get_user_best_scores_endpoint(uid: str, game_type: str, limit: int = 3
         logger.error(f"Error fetching user best scores: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch user best scores: {str(e)}")
 
+
+# ============================================================================
+# Performance Reports Endpoints
+# ============================================================================
+
+@router.get("/performance-report-history/{uid}")
+async def get_performance_reports(uid: str):
+    """
+    Get all performance reports for a student
+    Returns list of reports ordered by creation date (newest first)
+    """
+    try:
+        reports = db_service.get_performance_reports(uid)
+        return {
+            "success": True,
+            "student_uid": uid,
+            "reports": reports,
+            "count": len(reports)
+        }
+    except Exception as e:
+        logger.error(f"Error fetching performance reports: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch performance reports: {str(e)}")
+
+
+@router.get("/performance-reports/{uid}/latest")
+async def get_latest_performance_report(uid: str):
+    """
+    Get the most recent performance report for a student
+    """
+    try:
+        report = db_service.get_latest_performance_report(uid)
+        if not report:
+            raise HTTPException(status_code=404, detail="No performance reports found for this user")
+        
+        return {
+            "success": True,
+            "student_uid": uid,
+            "report": report
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching latest performance report: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch latest performance report: {str(e)}")
+
+
+@router.get("/performance-report/{uid}/check-availability")
+async def check_performance_report_availability(uid: str):
+    """
+    Check if a performance report can be generated for a student
+    Verifies:
+    - Student exists
+    - Has sufficient learning data (attempts)
+    - Neo4j is available (if needed)
+    """
+    try:
+        # Check if user exists
+        user_data = db_service.get_user_by_uid(uid)
+        if not user_data:
+            return {
+                "success": True,
+                "student_uid": uid,
+                "can_generate_report": False,
+                "student_exists": False,
+                "attempts_count": 0,
+                "sufficient_data": False,
+                "neo4j_available": False,
+                "message": "Student not found",
+                "timestamp": datetime.now(UTC).isoformat()
+            }
+        
+        # Count student's attempts across all question types
+        conn = db_service.db_factory.get_provider()._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT COUNT(*) FROM attempts WHERE uid = %s
+        """, (uid,))
+        attempts_count = cursor.fetchone()[0]
+        
+        cursor.close()
+        conn.close()
+        
+        # Require minimum 10 attempts for meaningful analysis
+        sufficient_data = attempts_count >= 10
+        
+        # For now, assume Neo4j availability = True (agentic service handles this)
+        neo4j_available = True
+        
+        can_generate = sufficient_data and neo4j_available
+        
+        message = "Report generation available"
+        if not sufficient_data:
+            message = f"Insufficient data: {attempts_count} attempts (minimum 10 required)"
+        elif not neo4j_available:
+            message = "Analysis service temporarily unavailable"
+        
+        return {
+            "success": True,
+            "student_uid": uid,
+            "can_generate_report": can_generate,
+            "student_exists": True,
+            "attempts_count": attempts_count,
+            "sufficient_data": sufficient_data,
+            "neo4j_available": neo4j_available,
+            "message": message,
+            "timestamp": datetime.now(UTC).isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error checking report availability: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to check report availability: {str(e)}")

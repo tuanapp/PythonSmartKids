@@ -629,5 +629,132 @@ def get_user_best_scores(uid: str, game_type: str, limit: int = 3):
         raise
 
 
+def get_performance_reports(uid: str):
+    """Get all performance reports for a student, ordered by creation date (newest first)."""
+    try:
+        import json
+        conn = db_provider._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT id, report_content, report_format, agent_statuses, execution_log,
+                   traces, trace_id, evidence_sufficient, evidence_quality_score, retrieval_attempts,
+                   errors, success, processing_time_ms, model_used, created_at, updated_at
+            FROM performance_reports
+            WHERE uid = %s
+            ORDER BY created_at DESC
+        """, (uid,))
+        
+        reports = []
+        
+        def _safe_load(val, default=None):
+            """Safely parse JSON from database (handles dict, list, bytes, str)."""
+            if val is None:
+                return default
+            if isinstance(val, (dict, list)):
+                return val
+            if isinstance(val, (bytes, bytearray)):
+                try:
+                    val = val.decode('utf-8')
+                except Exception:
+                    return default
+            try:
+                return json.loads(val)
+            except Exception:
+                return default
+        
+        for row in cursor.fetchall():
+            reports.append({
+                'id': row[0],
+                'report_content': row[1],
+                'report_format': row[2],
+                'agent_statuses': _safe_load(row[3], {}),
+                'execution_log': _safe_load(row[4], []),
+                'traces': row[5],
+                'trace_id': row[6],
+                'evidence_sufficient': row[7],
+                'evidence_quality_score': float(row[8]) if row[8] is not None else 0.0,
+                'retrieval_attempts': row[9],
+                'errors': _safe_load(row[10], []),
+                'success': row[11],
+                'processing_time_ms': row[12],
+                'model_used': row[13],
+                'created_at': row[14].isoformat() if row[14] else None,
+                'updated_at': row[15].isoformat() if row[15] else None
+            })
+        
+        cursor.close()
+        conn.close()
+        return reports
+        
+    except Exception as e:
+        logger.error(f"Error retrieving performance reports: {e}")
+        raise
+
+
+def get_latest_performance_report(uid: str):
+    """Get the most recent performance report for a student."""
+    try:
+        import json
+        conn = db_provider._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT id, report_content, report_format, agent_statuses, execution_log,
+                   traces, trace_id, evidence_sufficient, evidence_quality_score, retrieval_attempts,
+                   errors, success, processing_time_ms, model_used, created_at, updated_at
+            FROM performance_reports
+            WHERE uid = %s
+            ORDER BY created_at DESC
+            LIMIT 1
+        """, (uid,))
+        
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if not row:
+            return None
+        
+        def _safe_load(val, default=None):
+            """Safely parse JSON from database (handles dict, list, bytes, str)."""
+            if val is None:
+                return default
+            if isinstance(val, (dict, list)):
+                return val
+            if isinstance(val, (bytes, bytearray)):
+                try:
+                    val = val.decode('utf-8')
+                except Exception:
+                    return default
+            try:
+                return json.loads(val)
+            except Exception:
+                return default
+        
+        return {
+            'id': row[0],
+            'report_content': row[1],
+            'report_format': row[2],
+            'agent_statuses': _safe_load(row[3], {}),
+            'execution_log': _safe_load(row[4], []),
+            'traces': row[5],
+            'trace_id': row[6],
+            'evidence_sufficient': row[7],
+            'evidence_quality_score': float(row[8]) if row[8] is not None else 0.0,
+            'retrieval_attempts': row[9],
+            'errors': _safe_load(row[10], []),
+            'success': row[11],
+            'processing_time_ms': row[12],
+            'model_used': row[13],
+            'created_at': row[14].isoformat() if row[14] else None,
+            'updated_at': row[15].isoformat() if row[15] else None
+        }
+        
+    except Exception as e:
+        logger.error(f"Error retrieving latest performance report: {e}")
+        raise
+
+
 # Initialize the database when this module is imported
 init_db()
