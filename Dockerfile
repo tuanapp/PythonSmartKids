@@ -1,9 +1,11 @@
-# FROM python:3.10
+FROM python:3.10-slim
 
-# WORKDIR /app
+WORKDIR /app
+COPY . /app
 
-# COPY . .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# RUN pip install -r requirements.txt
+ENV PORT=8080
 
-# CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Use shell form so ${PORT} expands at runtime (Cloud Run always provides PORT).
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
