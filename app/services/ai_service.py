@@ -4,7 +4,6 @@ from openai import OpenAI
 from app.config import AI_BRIDGE_BASE_URL, AI_BRIDGE_API_KEY, AI_FALLBACK_MODEL_1, HTTP_REFERER, APP_TITLE, MAX_ATTEMPTS_HISTORY_LIMIT
 from app.validators.response_validator import OpenAIResponseValidator
 from app.services.prompt_service import PromptService
-from app.services.llm_service import llm_service
 import random
 from datetime import datetime, timedelta
 import logging
@@ -35,8 +34,15 @@ def get_models_to_try() -> List[str]:
     Returns:
         List of Forge model names to try in order
     """
-    # Get models from database (cached for 24 hours)
-    db_models = llm_service.get_ordered_forge_models(true) # TODO: diabled cache
+    # Get models from database (cached for 24 hours). This can fail during startup
+    # if DB env vars aren't configured yet (e.g., first-time Cloud Run deploy).
+    db_models = None
+    try:
+        from app.services.llm_service import llm_service
+
+        db_models = llm_service.get_ordered_forge_models(true)  # TODO: disabled cache
+    except Exception as e:
+        logger.warning(f"LLM DB model lookup unavailable, using fallback model only: {e}")
     
     if db_models:
         models = db_models.copy()

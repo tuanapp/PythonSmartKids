@@ -1,6 +1,15 @@
 import logging
 import os
-from app.config import NEON_SSLMODE
+from urllib.parse import urlparse
+
+from app.config import (
+    DATABASE_URL,
+    NEON_DBNAME,
+    NEON_HOST,
+    NEON_PASSWORD,
+    NEON_SSLMODE,
+    NEON_USER,
+)
 from app.db.db_interface import DatabaseProvider
 from app.db.neon_provider import NeonProvider
 
@@ -22,11 +31,25 @@ class DatabaseFactory:
         if DatabaseFactory._instance is None:
             logger.info("Using PostgreSQL database (NeonProvider)")
             
-            # Get PostgreSQL connection details from environment variables
-            dbname = os.getenv("NEON_DBNAME")
-            user = os.getenv("NEON_USER")
-            password = os.getenv("NEON_PASSWORD")
-            host = os.getenv("NEON_HOST")
+            # Prefer explicit env vars (Cloud Run), then fall back to app.config defaults
+            # (which may come from dotenv files in local/dev environments).
+            dbname = os.getenv("NEON_DBNAME") or NEON_DBNAME
+            user = os.getenv("NEON_USER") or NEON_USER
+            password = os.getenv("NEON_PASSWORD") or NEON_PASSWORD
+            host = os.getenv("NEON_HOST") or NEON_HOST
+
+            # As a last resort, try parsing DATABASE_URL if NEON_* are incomplete.
+            if not all([dbname, user, password, host]) and DATABASE_URL:
+                try:
+                    parsed = urlparse(DATABASE_URL)
+                    if parsed.hostname and parsed.username and parsed.path:
+                        host = host or parsed.hostname
+                        user = user or parsed.username
+                        password = password or (parsed.password or "")
+                        dbname = dbname or parsed.path.lstrip("/")
+                except Exception:
+                    # Keep the original missing-vars error below.
+                    pass
             
             # Validate required environment variables
             if not all([dbname, user, password, host]):
