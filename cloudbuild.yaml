@@ -1,0 +1,43 @@
+# Cloud Build pipeline for Backend_Python (FastAPI)
+# Builds a container image and deploys it to Cloud Run.
+#
+# Trigger suggestion:
+# - Set the trigger's "Included files" to: Backend_Python/**
+# - Set the trigger's "Build config" to: Backend_Python/cloudbuild.yaml
+
+substitutions:
+  _REGION: us-central1
+  _SERVICE: smartboy-backend
+  _IMAGE: gcr.io/$PROJECT_ID/smartboy-backend
+  # Set to "true" or "false" depending on whether the API should be public.
+  _ALLOW_UNAUTHENTICATED: "true"
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-t", "${_IMAGE}", "."]
+    dir: "Backend_Python"
+
+  - name: gcr.io/cloud-builders/docker
+    args: ["push", "${_IMAGE}"]
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image
+      - ${_IMAGE}
+      - --region
+      - ${_REGION}
+      - --platform
+      - managed
+      - --port
+      - "8080"
+      - --allow-unauthenticated
+
+images:
+  - "${_IMAGE}"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
