@@ -485,6 +485,8 @@ async def verify_purchase(
         Verification result with purchase_id if successful
     """
     try:
+        logger.info(f"[PURCHASE] Starting verification for user {uid}: product_id={request.product_id}, type={request.product_type}")
+        
         # Verify with Google Play
         if request.product_type == 'subscription':
             is_valid, purchase_data, error = billing_service.verify_subscription_purchase(
@@ -498,6 +500,7 @@ async def verify_purchase(
             )
         
         if not is_valid:
+            logger.warning(f"[PURCHASE] Verification failed for user {uid}: {error}")
             return VerifyPurchaseResponse(
                 success=False,
                 is_valid=False,
@@ -506,6 +509,7 @@ async def verify_purchase(
             )
         
         # Save purchase record
+        logger.info(f"[PURCHASE] Verification successful, saving to database...")
         auto_renewing = purchase_data.get('auto_renewing') if request.product_type == 'subscription' else None
         purchase_id = billing_service.save_purchase_record(
             uid=uid,
@@ -515,7 +519,7 @@ async def verify_purchase(
             auto_renewing=auto_renewing
         )
         
-        logger.info(f"Purchase verified for user {uid}: {request.product_id} (purchase_id: {purchase_id})")
+        logger.info(f"[PURCHASE] ✅ Purchase verified and saved to DB for user {uid}: product={request.product_id}, purchase_id={purchase_id}, table=google_play_purchases")
         
         return VerifyPurchaseResponse(
             success=True,
@@ -550,6 +554,8 @@ async def process_purchase(
         Processing result with updated subscription/credits
     """
     try:
+        logger.info(f"[PURCHASE] Processing purchase_id={request.purchase_id} for user {uid}")
+        
         # Get purchase details from database
         conn = DatabaseFactory.get_provider()._get_connection()
         cursor = conn.cursor()
@@ -562,9 +568,11 @@ async def process_purchase(
         conn.close()
         
         if not result:
+            logger.error(f"[PURCHASE] Purchase not found in DB: purchase_id={request.purchase_id}")
             raise HTTPException(status_code=404, detail="Purchase not found")
         
         product_id, purchase_uid = result
+        logger.info(f"[PURCHASE] Retrieved purchase from DB: product_id={product_id}, owner_uid={purchase_uid[:8]}...")
         
         # Verify purchase belongs to requesting user
         if purchase_uid != uid:
@@ -575,11 +583,14 @@ async def process_purchase(
         
         if product_id in SKU_TO_SUBSCRIPTION_LEVEL:
             # Process subscription
+            logger.info(f"[PURCHASE] Processing as SUBSCRIPTION: {product_id}")
             process_result = billing_service.process_subscription_purchase(
                 uid=uid,
                 product_id=product_id,
                 purchase_id=request.purchase_id
             )
+            
+            logger.info(f"[PURCHASE] ✅ Subscription activated for user {uid}: {product_id}, level {process_result['old_subscription']} → {process_result['new_subscription']}")
             
             return ProcessPurchaseResponse(
                 success=True,
@@ -591,11 +602,14 @@ async def process_purchase(
             
         elif product_id in SKU_TO_CREDIT_AMOUNT:
             # Process credit pack
+            logger.info(f"[PURCHASE] Processing as CREDIT PACK: {product_id}")
             process_result = billing_service.process_credit_pack_purchase(
                 uid=uid,
                 product_id=product_id,
                 purchase_id=request.purchase_id
             )
+            
+            logger.info(f"[PURCHASE] ✅ Credits granted for user {uid}: {product_id}, credits {process_result['old_credits']} → {process_result['new_credits']} (+{process_result['credits_granted']})")
             
             return ProcessPurchaseResponse(
                 success=True,
