@@ -70,8 +70,14 @@ class GooglePlayBillingService:
                 logger.warning("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON not configured")
                 return
             
-            # Decode base64 service account JSON
-            service_account_json = base64.b64decode(GOOGLE_PLAY_SERVICE_ACCOUNT_JSON).decode('utf-8')
+            # Decode base64 service account JSON with automatic padding correction
+            # Add padding if missing (common issue when copying base64 strings)
+            encoded = GOOGLE_PLAY_SERVICE_ACCOUNT_JSON.strip()
+            padding_needed = len(encoded) % 4
+            if padding_needed:
+                encoded += '=' * (4 - padding_needed)
+            
+            service_account_json = base64.b64decode(encoded).decode('utf-8')
             service_account_info = json.loads(service_account_json)
             
             # Create credentials
