@@ -424,6 +424,49 @@ async def get_user_credit_usage(
 # Google Play Billing Endpoints
 # ============================================================================
 
+@router.get("/billing/health")
+async def billing_health():
+    """
+    Check if Google Play API is properly initialized and ready to process purchases.
+    
+    Returns:
+        Health status of the billing system including:
+        - google_play_api_initialized: Whether the Google Play API client is ready
+        - package_name: The configured package name
+        - service_account_configured: Whether the service account JSON is set
+        - status: Overall health status (healthy/degraded)
+    """
+    # Ensure initialization is attempted (lazy init for serverless)
+    billing_service._ensure_initialized()
+    
+    is_initialized = billing_service.publisher_api is not None
+    has_service_account = bool(GOOGLE_PLAY_SERVICE_ACCOUNT_JSON)
+    
+    # Try to get more diagnostic info
+    diagnostic_info = {}
+    if has_service_account and not is_initialized:
+        try:
+            import base64
+            import json as json_lib
+            # Test if we can decode the service account JSON
+            decoded = base64.b64decode(GOOGLE_PLAY_SERVICE_ACCOUNT_JSON).decode('utf-8')
+            parsed = json_lib.loads(decoded)
+            diagnostic_info['can_decode_json'] = True
+            diagnostic_info['has_project_id'] = 'project_id' in parsed
+            diagnostic_info['has_private_key'] = 'private_key' in parsed
+        except Exception as e:
+            diagnostic_info['decode_error'] = str(e)
+    
+    return {
+        "google_play_api_initialized": is_initialized,
+        "service_account_configured": has_service_account,
+        "package_name": billing_service.package_name,
+        "status": "healthy" if is_initialized else "degraded",
+        "message": "Billing system ready" if is_initialized else "Google Play API not initialized - check GOOGLE_PLAY_SERVICE_ACCOUNT_JSON environment variable",
+        "diagnostics": diagnostic_info if diagnostic_info else None
+    }
+
+
 @router.post("/billing/verify-purchase", response_model=VerifyPurchaseResponse)
 async def verify_purchase(
     request: VerifyPurchaseRequest,

@@ -54,10 +54,17 @@ class GooglePlayBillingService:
         self.db_provider = DatabaseFactory.get_provider()
         self.package_name = GOOGLE_PLAY_PACKAGE_NAME
         self.publisher_api = None
+        self._init_attempted = False
         self._initialize_api()
+    
+    def _ensure_initialized(self):
+        """Ensure API is initialized (lazy initialization for serverless environments)"""
+        if not self._init_attempted or (not self.publisher_api and GOOGLE_PLAY_SERVICE_ACCOUNT_JSON):
+            self._initialize_api()
     
     def _initialize_api(self):
         """Initialize Google Play Developer API client"""
+        self._init_attempted = True
         try:
             if not GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:
                 logger.warning("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON not configured")
@@ -78,7 +85,7 @@ class GooglePlayBillingService:
             logger.info("Google Play Developer API initialized successfully")
             
         except Exception as e:
-            logger.error(f"Failed to initialize Google Play API: {e}")
+            logger.error(f"Failed to initialize Google Play API: {e}", exc_info=True)
             self.publisher_api = None
     
     def verify_subscription_purchase(
@@ -92,6 +99,7 @@ class GooglePlayBillingService:
         Returns:
             (is_valid, purchase_data, error_message)
         """
+        self._ensure_initialized()
         if not self.publisher_api:
             return False, None, "Google Play API not initialized"
         
@@ -137,6 +145,7 @@ class GooglePlayBillingService:
         Returns:
             (is_valid, purchase_data, error_message)
         """
+        self._ensure_initialized()
         if not self.publisher_api:
             return False, None, "Google Play API not initialized"
         
