@@ -15,6 +15,7 @@ from app.validators.billing_validators import (
 from app.repositories import db_service
 from app.db.vercel_migrations import migration_manager
 from app.db.models import get_session
+from app.config import GOOGLE_PLAY_SERVICE_ACCOUNT_JSON
 import uuid
 from app.db.db_factory import DatabaseFactory
 from datetime import datetime, UTC
