@@ -15,6 +15,7 @@ from app.validators.billing_validators import (
 from app.repositories import db_service
 from app.db.vercel_migrations import migration_manager
 from app.db.models import get_session
+from app.config import GOOGLE_PLAY_SERVICE_ACCOUNT_JSON
 import uuid
 from app.db.db_factory import DatabaseFactory
 from datetime import datetime, UTC
@@ -423,6 +424,30 @@ async def get_user_credit_usage(
 # ============================================================================
 # Google Play Billing Endpoints
 # ============================================================================
+
+@router.get("/billing/health")
+async def billing_health():
+    """
+    Check if Google Play API is properly initialized and ready to process purchases.
+    
+    Returns:
+        Health status of the billing system including:
+        - google_play_api_initialized: Whether the Google Play API client is ready
+        - package_name: The configured package name
+        - service_account_configured: Whether the service account JSON is set
+        - status: Overall health status (healthy/degraded)
+    """
+    is_initialized = billing_service.publisher_api is not None
+    has_service_account = bool(GOOGLE_PLAY_SERVICE_ACCOUNT_JSON)
+    
+    return {
+        "google_play_api_initialized": is_initialized,
+        "service_account_configured": has_service_account,
+        "package_name": billing_service.package_name,
+        "status": "healthy" if is_initialized else "degraded",
+        "message": "Billing system ready" if is_initialized else "Google Play API not initialized - check GOOGLE_PLAY_SERVICE_ACCOUNT_JSON environment variable"
+    }
+
 
 @router.post("/billing/verify-purchase", response_model=VerifyPurchaseResponse)
 async def verify_purchase(
