@@ -66,3 +66,22 @@ class GetPurchaseHistoryResponse(BaseModel):
     """Response containing user's purchase history"""
     purchases: list
     count: int
+
+
+class RefundPurchaseRequest(BaseModel):
+    """Admin request to refund a purchase"""
+    purchase_id: int = Field(..., description="Database purchase ID to refund")
+    refund_reason: str = Field(..., min_length=3, max_length=500, description="Reason for refund")
+    admin_key: str = Field(..., description="Admin authorization key")
+
+
+class RefundPurchaseResponse(BaseModel):
+    """Response from refund operation"""
+    success: bool
+    purchase_id: int
+    product_id: str
+    credits_deducted: int
+    old_credits: int
+    new_credits: int
+    message: str
+    error: Optional[str] = None

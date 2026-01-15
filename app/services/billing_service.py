@@ -513,7 +513,170 @@ class GooglePlayBillingService:
         finally:
             cursor.close()
             conn.close()
+    
+    def refund_purchase(
+        self,
+        purchase_id: int,
+        refund_reason: str
+    ) -> Dict[str, Any]:
+        """
+        Refund a purchase - deduct credits and mark as cancelled
+        
+        Args:
+            purchase_id: Database purchase ID to refund
+            refund_reason: Reason for the refund
+            
+        Returns:
+            Refund result with credits deducted
+        """
+        conn = self.db_provider._get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Get purchase details
+            cursor.execute("""
+                SELECT uid, product_id, purchase_state, purchase_token 
+                FROM google_play_purchases 
+                WHERE id = %s
+            """, (purchase_id,))
+            
+            result = cursor.fetchone()
+            if not result:
+                raise ValueError(f"Purchase not found: {purchase_id}")
+            
+            uid, product_id, purchase_state, purchase_token = result
+            
+            # Check if already refunded
+            if purchase_state == 1:
+                raise ValueError(f"Purchase {purchase_id} already refunded/cancelled")
+            
+            # Get credits granted for this purchase
+            cursor.execute("""
+                SELECT credits_granted FROM subscription_history 
+                WHERE purchase_id = %s AND event IN ('CREDIT_PURCHASE', 'STARTED')
+                ORDER BY performed_at DESC LIMIT 1
+            """, (purchase_id,))
+            
+            credits_result = cursor.fetchone()
+            credits_to_deduct = credits_result[0] if credits_result else 0
+            
+            # Get current user credits
+            cursor.execute("SELECT credits FROM users WHERE uid = %s", (uid,))
+            user_result = cursor.fetchone()
+            if not user_result:
+                raise ValueError(f"User not found: {uid}")
+            
+            old_credits = user_result[0] or 0
+            new_credits = max(0, old_credits - credits_to_deduct)  # Don't go negative
+            
+            # Deduct credits from user
+            cursor.execute("""
+                UPDATE users 
+                SET credits = %s 
+                WHERE uid = %s
+            """, (new_credits, uid))
+            
+            # Mark purchase as cancelled (state = 1)
+            cursor.execute("""
+                UPDATE google_play_purchases 
+                SET purchase_state = 1, 
+                    updated_at = CURRENT_TIMESTAMP 
+                WHERE id = %s
+            """, (purchase_id,))
+            
+            # Log refund in subscription_history
+            cursor.execute("""
+                INSERT INTO subscription_history 
+                (uid, purchase_id, event, credits_granted, notes, refund_reason)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (
+                uid,
+                purchase_id,
+                'REFUND',
+                -credits_to_deduct,  # Negative to indicate deduction
+                f'Refunded {product_id} - deducted {credits_to_deduct} credits',
+                refund_reason
+            ))
+            
+            conn.commit()
+            
+            logger.info(f"Refunded purchase {purchase_id} for user {uid}: deducted {credits_to_deduct} credits ({old_credits} -> {new_credits})")
+            
+            return {
+                'success': True,
+                'purchase_id': purchase_id,
+                'product_id': product_id,
+                'uid': uid,
+                'credits_deducted': credits_to_deduct,
+                'old_credits': old_credits,
+                'new_credits': new_credits
+            }
+            
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error refunding purchase: {e}")
+            raise
+        finally:
+            cursor.close()
+            conn.close()
+    
+    def handle_webhook_refund(
+        self,
+        purchase_token: str,
+        notification_type: int
+    ) -> Dict[str, Any]:
+        """
+        Handle refund from Google Play webhook
+        
+        Args:
+            purchase_token: Google Play purchase token
+            notification_type: Notification type from webhook
+            
+        Returns:
+            Refund result
+        """
+        conn = self.db_provider._get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Find purchase by token
+            cursor.execute("""
+                SELECT id, uid, product_id, purchase_state 
+                FROM google_play_purchases 
+                WHERE purchase_token = %s
+            """, (purchase_token,))
+            
+            result = cursor.fetchone()
+            if not result:
+                logger.warning(f"Purchase not found for webhook token: {purchase_token}")
+                return {'success': False, 'error': 'Purchase not found'}
+            
+            purchase_id, uid, product_id, purchase_state = result
+            
+            # Skip if already refunded
+            if purchase_state == 1:
+                logger.info(f"Purchase {purchase_id} already refunded")
+                return {'success': True, 'message': 'Already refunded'}
+            
+            # Determine refund reason from notification type
+            notification_types = {
+                12: 'SUBSCRIPTION_REVOKED',
+                13: 'SUBSCRIPTION_EXPIRED',
+                3: 'SUBSCRIPTION_CANCELED'
+            }
+            refund_reason = f"Google Play webhook: {notification_types.get(notification_type, f'Type {notification_type}')}"
+            
+            # Process refund
+            return self.refund_purchase(purchase_id, refund_reason)
+            
+        except Exception as e:
+            logger.error(f"Error handling webhook refund: {e}")
+            raise
+        finally:
+            cursor.close()
+            conn.close()
 
 
 # Global instance
 billing_service = GooglePlayBillingService()
+

@@ -10,7 +10,8 @@ from app.validators.billing_validators import (
     ProcessPurchaseRequest, ProcessPurchaseResponse,
     GooglePlayWebhookRequest,
     UpdateSubscriptionRequest, UpdateSubscriptionResponse,
-    GetPurchaseHistoryResponse
+    GetPurchaseHistoryResponse,
+    RefundPurchaseRequest, RefundPurchaseResponse
 )
 from app.repositories import db_service
 from app.db.vercel_migrations import migration_manager
@@ -668,6 +669,18 @@ async def google_play_webhook(request: GooglePlayWebhookRequest):
             # 13 = SUBSCRIPTION_EXPIRED
             
             if notification_type in [3, 12, 13]:  # Cancelled, Revoked, or Expired
+                # For revoked subscriptions, also refund credits
+                if notification_type == 12:  # SUBSCRIPTION_REVOKED
+                    try:
+                        refund_result = billing_service.handle_webhook_refund(
+                            purchase_token=purchase_token,
+                            notification_type=notification_type
+                        )
+                        logger.info(f"Webhook refund processed for user {uid}: {refund_result}")
+                    except Exception as e:
+                        logger.error(f"Error processing webhook refund: {e}")
+                
+                # Cancel subscription for all cancellation types
                 billing_service.cancel_subscription(
                     uid=uid,
                     purchase_id=purchase_id,
@@ -702,9 +715,27 @@ async def google_play_webhook(request: GooglePlayWebhookRequest):
                     
                     logger.info(f"Subscription renewed for user {uid}")
         
-        # Handle one-time product notifications
+        # Handle one-time product notifications (credit pack refunds)
         elif request.oneTimeProductNotification:
-            logger.info(f"One-time product notification: {request.oneTimeProductNotification}")
+            notification = request.oneTimeProductNotification
+            notification_type = notification.get('notificationType')
+            purchase_token = notification.get('purchaseToken')
+            
+            # Notification types for one-time products:
+            # 1 = ONE_TIME_PRODUCT_PURCHASED
+            # 2 = ONE_TIME_PRODUCT_CANCELED
+            
+            if notification_type == 2:  # ONE_TIME_PRODUCT_CANCELED (refund)
+                try:
+                    refund_result = billing_service.handle_webhook_refund(
+                        purchase_token=purchase_token,
+                        notification_type=notification_type
+                    )
+                    logger.info(f"Credit pack refund processed: {refund_result}")
+                except Exception as e:
+                    logger.error(f"Error processing credit pack refund: {e}")
+            else:
+                logger.info(f"One-time product notification type {notification_type}: {notification}")
         
         return {"status": "ok", "message": "Webhook processed"}
         
@@ -821,6 +852,67 @@ async def expire_credits_admin(
     except Exception as e:
         logger.error(f"Error in expire credits admin endpoint: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to expire credits: {str(e)}")
+
+
+@router.post("/admin/billing/refund", response_model=RefundPurchaseResponse)
+async def refund_purchase_admin(request: RefundPurchaseRequest):
+    """
+    Admin endpoint to refund a purchase
+    Deducts credits from user and marks purchase as cancelled
+    
+    Args:
+        request: Refund request with purchase_id, reason, and admin_key
+    
+    Returns:
+        Refund result with credits deducted
+    """
+    try:
+        # Verify admin key
+        expected_key = os.getenv('ADMIN_KEY', 'dev-admin-key')
+        if request.admin_key != expected_key:
+            raise HTTPException(status_code=401, detail="Invalid admin key")
+        
+        # Process refund
+        result = billing_service.refund_purchase(
+            purchase_id=request.purchase_id,
+            refund_reason=request.refund_reason
+        )
+        
+        return RefundPurchaseResponse(
+            success=True,
+            purchase_id=result['purchase_id'],
+            product_id=result['product_id'],
+            credits_deducted=result['credits_deducted'],
+            old_credits=result['old_credits'],
+            new_credits=result['new_credits'],
+            message=f"Refunded {result['product_id']}: deducted {result['credits_deducted']} credits"
+        )
+        
+    except HTTPException:
+        raise
+    except ValueError as e:
+        return RefundPurchaseResponse(
+            success=False,
+            purchase_id=request.purchase_id,
+            product_id="",
+            credits_deducted=0,
+            old_credits=0,
+            new_credits=0,
+            message="Refund failed",
+            error=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error refunding purchase {request.purchase_id}: {e}")
+        return RefundPurchaseResponse(
+            success=False,
+            purchase_id=request.purchase_id,
+            product_id="",
+            credits_deducted=0,
+            old_credits=0,
+            new_credits=0,
+            message="Refund failed",
+            error=str(e)
+        )
 
 
 @router.get("/billing/purchases/{user_uid}", response_model=GetPurchaseHistoryResponse)
