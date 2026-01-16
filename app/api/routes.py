@@ -1149,9 +1149,16 @@ async def generate_questions(request: GenerateQuestionsRequest):
         # Get user data to check subscription level and credits
         user_data = db_service.get_user_by_uid(request.uid)
         
-        # Default values if user not found (should not happen with auth middleware)
-        subscription = user_data.get("subscription", 0) if user_data else 0
-        credits = user_data.get("credits", 0) if user_data else 0
+        # Reject if user not found in database
+        if not user_data:
+            logger.error(f"User {request.uid} not found in database")
+            raise HTTPException(
+                status_code=404,
+                detail="User not found. Please register first."
+            )
+        
+        subscription = user_data.get("subscription", 0)
+        credits = user_data.get("credits", 0)
         
         logger.info(f"User {request.uid} subscription level: {subscription}, credits: {credits}")
         
@@ -1879,6 +1886,11 @@ async def evaluate_answers(request: dict):
         raise HTTPException(status_code=400, detail="evaluations list is required")
     
     try:
+        # Check user exists
+        user_data = db_service.get_user_by_uid(uid)
+        if not user_data:
+            raise HTTPException(status_code=404, detail="User not found. Please register first.")
+        
         # Get subject info
         subject = KnowledgeService.get_subject_by_id(subject_id)
         if not subject:
@@ -2566,6 +2578,11 @@ async def submit_game_score(score_data: dict):
         logger.info(f"[/game-scores POST] Validating input with GameScoreSubmit...")
         score = GameScoreSubmit(**score_data)
         logger.info(f"[/game-scores POST] Validated: uid={score.uid}, game_type={score.game_type}, score={score.score}")
+        
+        # Check user exists
+        user_data = db_service.get_user_by_uid(score.uid)
+        if not user_data:
+            raise HTTPException(status_code=404, detail="User not found. Please register first.")
         
         if score.game_type not in ['multiplication_time', 'multiplication_range']:
             raise HTTPException(status_code=400, detail="Invalid game_type. Must be 'multiplication_time' or 'multiplication_range'")
