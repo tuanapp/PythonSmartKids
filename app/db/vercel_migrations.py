@@ -435,6 +435,10 @@ class VercelMigrationManager:
             performance_reports_result = self.apply_migration_023()
             logger.info(f"Performance reports table migration result: {performance_reports_result['message']}")
             
+            # Migration 024: Add help_tone_preference column to users table
+            help_tone_result = self.apply_migration_024()
+            logger.info(f"Help tone preference migration result: {help_tone_result['message']}")
+            
             # Verify the migration was successful
             status = self.check_migration_status()
             
@@ -467,7 +471,8 @@ class VercelMigrationManager:
                     'Question number in knowledge usage log',
                     'Promo code column on users table',
                     'Google Play purchases table',
-                    'Subscription history table'
+                    'Subscription history table',
+                    'Help tone preference column on users table'
                 ]
             }
             
@@ -2487,6 +2492,77 @@ class VercelMigrationManager:
         
         except Exception as e:
             logger.error(f"Error in migration 023: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    def apply_migration_024(self) -> Dict[str, Any]:
+        """
+        Migration 024: Add help_tone_preference column to users table
+        Allows users to customize the difficulty level of AI-generated help explanations
+        """
+        messages = []
+        
+        try:
+            conn = self.db_provider._get_connection()
+            cursor = conn.cursor()
+            
+            # Check if help_tone_preference column exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.columns 
+                    WHERE table_name = 'users' AND column_name = 'help_tone_preference'
+                )
+            """)
+            column_exists = cursor.fetchone()[0]
+            
+            if not column_exists:
+                # Add help_tone_preference column
+                cursor.execute("""
+                    ALTER TABLE users ADD COLUMN help_tone_preference VARCHAR(10) DEFAULT NULL
+                """)
+                messages.append("Added help_tone_preference column to users table")
+                logger.info("Added help_tone_preference column to users table")
+                
+                # Add comment
+                cursor.execute("""
+                    COMMENT ON COLUMN users.help_tone_preference IS 
+                    'Preferred help explanation tone: NULL/kid=simple, auto=grade-1, or specific grade 1-12'
+                """)
+                messages.append("Added comment to help_tone_preference column")
+                
+                # Create index for better query performance
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_users_help_tone_preference 
+                    ON users(help_tone_preference)
+                """)
+                messages.append("Created index on help_tone_preference column")
+                logger.info("Created index on help_tone_preference")
+            else:
+                messages.append("help_tone_preference column already exists")
+            
+            # Update migration version to 024
+            cursor.execute("""
+                DELETE FROM alembic_version WHERE version_num = '024'
+            """)
+            cursor.execute("""
+                INSERT INTO alembic_version (version_num) VALUES ('024')
+                ON CONFLICT (version_num) DO NOTHING
+            """)
+            messages.append("Updated alembic version to 024")
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            return {
+                'success': True,
+                'message': '; '.join(messages) if messages else 'Migration 024 already applied'
+            }
+        
+        except Exception as e:
+            logger.error(f"Error in migration 024: {e}")
             return {
                 'success': False,
                 'error': str(e)

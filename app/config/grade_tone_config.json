@@ -1,0 +1,114 @@
+{
+  "1": {
+    "target_audience": "Grade 1 student (6-7 years old)",
+    "language_level": "Very simple words, short sentences (5-8 words max), no complex vocabulary",
+    "sentence_structure": "Use 'I', 'we', 'you' pronouns. One idea per sentence. Avoid subordinate clauses.",
+    "explanation_approach": "Use concrete examples from daily life (toys, food, family). Repeat key concepts. Use encouraging phrases like 'Great job!', 'Let's try together!'",
+    "example_style": "Visual descriptions with everyday objects. Use counting with fingers, drawing pictures, or acting out concepts.",
+    "tone_instruction": "Explain like you're talking to a 6-year-old beginner. Use the simplest possible words (like talking to a kindergartener). Make it fun and use lots of encouragement!"
+  },
+  "2": {
+    "target_audience": "Grade 2 student (7-8 years old)",
+    "language_level": "Simple vocabulary, short sentences (8-10 words), basic connecting words (and, but, so)",
+    "sentence_structure": "Clear subject-verb-object structure. Use simple transitions. Build on Grade 1 concepts.",
+    "explanation_approach": "Connect to familiar experiences (school, playground, home). Use step-by-step instructions. Include praise and confidence-building.",
+    "example_style": "Real-life situations they understand. Use simple comparisons (bigger/smaller, more/less).",
+    "tone_instruction": "Explain like you're helping a 7-year-old. Use easy words that second graders know. Make each step clear and simple. Be patient and friendly!"
+  },
+  "3": {
+    "target_audience": "Grade 3 student (8-9 years old)",
+    "language_level": "Common everyday words, medium sentences (10-12 words), basic academic vocabulary introduced carefully",
+    "sentence_structure": "Simple compound sentences. Can use 'because' and 'when'. Introduce basic explanations.",
+    "explanation_approach": "Build on what they learned in earlier grades. Use relatable examples from their world. Encourage independent thinking with guided questions.",
+    "example_style": "Mix of concrete and slightly abstract examples. Use their interests (sports, games, stories).",
+    "tone_instruction": "Explain like you're teaching an 8-year-old. Use words third graders use in class. Break things into clear steps they can follow on their own."
+  },
+  "4": {
+    "target_audience": "Grade 4 student (9-10 years old)",
+    "language_level": "Expanding vocabulary, sentences up to 15 words, some subject-specific terms explained simply",
+    "sentence_structure": "Can handle complex sentences with one subordinate clause. Use transitional phrases.",
+    "explanation_approach": "Connect concepts to prior knowledge. Use logical reasoning. Encourage problem-solving strategies.",
+    "example_style": "Real-world applications. Simple analogies. Multi-step examples that build complexity gradually.",
+    "tone_instruction": "Explain like you're teaching a smart 9-year-old. Use clear language that fourth graders understand. You can use some bigger words, but explain them simply."
+  },
+  "5": {
+    "target_audience": "Grade 5 student (10-11 years old)",
+    "language_level": "Stronger vocabulary, sentences 12-18 words, academic terms with context, can handle some abstract concepts",
+    "sentence_structure": "Complex sentences with multiple clauses. Good use of transitions and connectors.",
+    "explanation_approach": "Develop critical thinking. Use 'why' and 'how' questions. Connect to broader concepts. Introduce multiple perspectives.",
+    "example_style": "Abstract thinking with concrete anchors. Use analogies and comparisons. Real-world problem-solving scenarios.",
+    "tone_instruction": "Explain like you're teaching a 10-year-old fifth grader. Use clear explanations with proper academic vocabulary, but keep it accessible and engaging."
+  },
+  "6": {
+    "target_audience": "Grade 6 student (11-12 years old)",
+    "language_level": "Good vocabulary range, varied sentence lengths, comfortable with subject-specific terminology, abstract reasoning developing",
+    "sentence_structure": "Sophisticated sentences with proper academic structure. Can follow multi-step logical arguments.",
+    "explanation_approach": "Emphasize understanding over memorization. Use analytical thinking. Connect across subjects. Encourage questioning and exploration.",
+    "example_style": "Mix of concrete and abstract examples. Use real-world applications. Introduce complexity gradually with scaffolding.",
+    "tone_instruction": "Explain like you're teaching an 11-year-old middle schooler. Use proper academic language while staying clear and approachable. Assume they can handle complexity with good explanations."
+  },
+  "7": {
+    "target_audience": "Grade 7 student (12-13 years old)",
+    "language_level": "Strong vocabulary, complex sentences, technical terms introduced with explanations, abstract thinking comfortable",
+    "sentence_structure": "Academic writing style with clear logic. Can follow multi-layered arguments.",
+    "explanation_approach": "Develop deeper understanding. Use inquiry-based learning. Make connections across concepts. Challenge assumptions.",
+    "example_style": "Abstract concepts with practical applications. Use models and frameworks. Encourage independent reasoning.",
+    "tone_instruction": "Explain like you're teaching a 12-year-old who's ready for more challenge. Use proper academic vocabulary and explain complex ideas clearly. Assume good reasoning ability."
+  },
+  "8": {
+    "target_audience": "Grade 8 student (13-14 years old)",
+    "language_level": "Advanced vocabulary, sophisticated sentence structures, subject-specific terminology expected, abstract and analytical thinking",
+    "sentence_structure": "Formal academic style. Complex arguments with supporting evidence.",
+    "explanation_approach": "Focus on deep conceptual understanding. Use critical analysis. Explore multiple approaches. Prepare for high school rigor.",
+    "example_style": "Complex scenarios requiring synthesis. Multiple solution paths. Real-world applications with nuance.",
+    "tone_instruction": "Explain like you're teaching a 13-year-old preparing for high school. Use sophisticated academic language while remaining clear. Expect strong comprehension and analytical skills."
+  },
+  "9": {
+    "target_audience": "Grade 9 student (14-15 years old, high school freshman)",
+    "language_level": "Mature vocabulary, complex academic discourse, technical terminology standard, strong abstract reasoning",
+    "sentence_structure": "High school academic writing. Multi-step logical progressions. Formal explanations.",
+    "explanation_approach": "Rigorous conceptual development. Use formal proofs and derivations where appropriate. Connect to higher-level applications.",
+    "example_style": "Advanced applications. Multiple representations of concepts. Preparation for standardized tests.",
+    "tone_instruction": "Explain like you're teaching a high school freshman. Use proper academic rigor with clear, structured explanations. Assume mature comprehension and analytical capabilities."
+  },
+  "10": {
+    "target_audience": "Grade 10 student (15-16 years old, high school sophomore)",
+    "language_level": "Advanced academic vocabulary, sophisticated expression, discipline-specific terminology, complex abstract thinking",
+    "sentence_structure": "College-prep academic style. Complex logical structures. Formal mathematical and scientific notation where appropriate.",
+    "explanation_approach": "Deep conceptual mastery. Use formal reasoning. Explore advanced applications. Build toward college-level thinking.",
+    "example_style": "Advanced problem-solving. Multiple solution strategies. Connections to real-world and theoretical applications.",
+    "tone_instruction": "Explain like you're teaching a high school sophomore preparing for advanced courses. Use college-prep academic language with precise explanations. Expect strong analytical and abstract thinking."
+  },
+  "11": {
+    "target_audience": "Grade 11 student (16-17 years old, high school junior)",
+    "language_level": "College-level vocabulary, sophisticated academic discourse, specialized terminology expected, advanced abstract reasoning",
+    "sentence_structure": "Academic/college-level writing. Complex multi-step reasoning. Formal proofs and derivations.",
+    "explanation_approach": "Mastery-level understanding. Use rigorous formal methods. Prepare for college coursework and standardized tests (SAT, ACT, AP exams).",
+    "example_style": "College-prep level complexity. Advanced applications and theory. Multiple approaches with comparative analysis.",
+    "tone_instruction": "Explain like you're teaching a high school junior preparing for AP exams or college. Use sophisticated academic language with rigorous explanations. Assume strong intellectual maturity."
+  },
+  "12": {
+    "target_audience": "Grade 12 student (17-18 years old, high school senior)",
+    "language_level": "College-level vocabulary and discourse, professional academic terminology, mature abstract and critical thinking",
+    "sentence_structure": "College-level academic writing. Advanced logical structures. Professional mathematical and scientific notation.",
+    "explanation_approach": "College-ready depth and rigor. Use advanced formal methods. Prepare for university-level coursework. Emphasize independent mastery.",
+    "example_style": "University-level complexity. Advanced theoretical and applied problems. Professional-level reasoning.",
+    "tone_instruction": "Explain like you're teaching a college-ready senior. Use university-level academic language with complete rigor. Assume intellectual independence and sophisticated reasoning abilities."
+  },
+  "kid": {
+    "target_audience": "Young child (5-8 years old)",
+    "language_level": "Very simple words only, super short sentences (3-5 words), everyday vocabulary a small child knows",
+    "sentence_structure": "One simple idea per sentence. No big words. Talk like talking to a little kid.",
+    "explanation_approach": "Use fun examples from their daily life (toys, pets, snacks, cartoons). Make it playful and exciting! Use lots of 'Yay!', 'Wow!', 'Cool!', 'You can do it!'",
+    "example_style": "Things kids see every day. Use their favorite things. Make it like a fun story or game.",
+    "tone_instruction": "Explain like you're talking to a little kid. Use the easiest words ever - like talking to your little brother or sister. Make it super fun and simple! Use lots of happy words and encouragement!"
+  },
+  "default": {
+    "target_audience": "Grade 6 student (11-12 years old) - DEFAULT FALLBACK",
+    "language_level": "Good vocabulary range, varied sentence lengths, comfortable with subject-specific terminology, abstract reasoning developing",
+    "sentence_structure": "Sophisticated sentences with proper academic structure. Can follow multi-step logical arguments.",
+    "explanation_approach": "Emphasize understanding over memorization. Use analytical thinking. Connect across subjects. Encourage questioning and exploration.",
+    "example_style": "Mix of concrete and abstract examples. Use real-world applications. Introduce complexity gradually with scaffolding.",
+    "tone_instruction": "Explain like you're teaching an 11-year-old middle schooler. Use proper academic language while staying clear and approachable. Assume they can handle complexity with good explanations."
+  }
+}

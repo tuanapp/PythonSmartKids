@@ -86,7 +86,8 @@ async def get_user(uid: str):
             "is_premium": is_premium,
             "is_blocked": user_data.get("is_blocked", False),
             "blocked_reason": user_data.get("blocked_reason"),
-            "is_debug": user_data.get("is_debug", False)
+            "is_debug": user_data.get("is_debug", False),
+            "help_tone_preference": user_data.get("help_tone_preference")
         }
     except HTTPException:
         raise
@@ -96,7 +97,7 @@ async def get_user(uid: str):
 
 @router.patch("/users/{uid}/profile")
 async def update_user_profile(uid: str, update: UserProfileUpdate):
-    """Update user profile (name, displayName, gradeLevel)"""
+    """Update user profile (name, displayName, gradeLevel, helpTonePreference)"""
     try:
         # Verify user exists
         user_data = db_service.get_user_by_uid(uid)
@@ -104,7 +105,7 @@ async def update_user_profile(uid: str, update: UserProfileUpdate):
             raise HTTPException(status_code=404, detail="User not found")
         
         # Check if any field is provided
-        if update.name is None and update.displayName is None and update.gradeLevel is None:
+        if update.name is None and update.displayName is None and update.gradeLevel is None and update.helpTonePreference is None:
             raise HTTPException(status_code=400, detail="No fields to update")
         
         # Update profile
@@ -112,7 +113,8 @@ async def update_user_profile(uid: str, update: UserProfileUpdate):
             uid,
             name=update.name,
             display_name=update.displayName,
-            grade_level=update.gradeLevel
+            grade_level=update.gradeLevel,
+            help_tone_preference=update.helpTonePreference
         )
         
         updated_fields = []
@@ -122,6 +124,8 @@ async def update_user_profile(uid: str, update: UserProfileUpdate):
             updated_fields.append(f"displayName={update.displayName}")
         if update.gradeLevel is not None:
             updated_fields.append(f"gradeLevel={update.gradeLevel}")
+        if update.helpTonePreference is not None:
+            updated_fields.append(f"helpTonePreference={update.helpTonePreference}")
         
         logger.info(f"Updated profile for user {uid}: {', '.join(updated_fields)}")
         
@@ -131,6 +135,7 @@ async def update_user_profile(uid: str, update: UserProfileUpdate):
             "name": update.name,
             "displayName": update.displayName,
             "gradeLevel": update.gradeLevel,
+            "helpTonePreference": update.helpTonePreference,
             "message": "Profile updated successfully"
         }
     except HTTPException:
@@ -2028,6 +2033,7 @@ async def generate_question_help(request: dict):
     from app.repositories.db_service import get_user_by_uid
     from app.repositories.knowledge_service import KnowledgeService
     from app.services.prompt_service import PromptService
+    from app.config import HELP_GRADE_REDUCTION
     
     # Extract and validate parameters
     uid = request.get('uid')
@@ -2042,6 +2048,7 @@ async def generate_question_help(request: dict):
     attempt_id = request.get('attempt_id')  # Optional: ID of the attempt this help is for
     quiz_session_id = request.get('quiz_session_id')  # NEW: Session ID for linking
     question_number = request.get('question_number')  # NEW: Question number in quiz (1-based)
+    requested_help_grade = request.get('help_grade_level')  # NEW: Override grade level for help
     
     if not uid:
         raise HTTPException(status_code=400, detail="uid is required")
@@ -2093,6 +2100,34 @@ async def generate_question_help(request: dict):
                 }
             )
         
+        # Get grade level for tone adjustment (user already fetched above)
+        student_grade_level = user.get('grade_level') if user else None
+        user_help_preference = user.get('help_tone_preference') if user else None
+        
+        # Calculate help grade level
+        # Priority: 1) Explicit request override, 2) User saved preference, 3) Apply reduction, 4) Use student grade
+        if requested_help_grade is not None:
+            # User explicitly requested a specific grade level
+            help_grade_level = max(1, requested_help_grade)  # Ensure minimum grade 1
+        elif user_help_preference:
+            # User has saved preference - interpret it
+            if user_help_preference == 'auto' and student_grade_level:
+                # Auto means one grade simpler
+                help_grade_level = max(1, student_grade_level - 1)
+            elif user_help_preference == 'kid':
+                help_grade_level = 'kid'
+            elif user_help_preference.isdigit():
+                help_grade_level = int(user_help_preference)
+            else:
+                # Fallback to default if invalid preference
+                help_grade_level = student_grade_level
+        elif student_grade_level is not None and HELP_GRADE_REDUCTION > 0:
+            # Apply grade reduction (e.g., Grade 6 - 1 = Grade 5 explanation)
+            help_grade_level = max(1, student_grade_level - HELP_GRADE_REDUCTION)
+        else:
+            # No reduction, use student's actual grade (or NULL defaults to 'kid')
+            help_grade_level = student_grade_level if student_grade_level else 'kid'
+        
         # Generate help using AI
         help_result = prompt_service.generate_question_help(
             uid=uid,
@@ -2102,7 +2137,8 @@ async def generate_question_help(request: dict):
             subject_name=subject_name,
             user_answer=user_answer,
             has_answered=has_answered,
-            visual_preference=visual_preference
+            visual_preference=visual_preference,
+            student_grade_level=help_grade_level  # Use calculated help grade level
         )
         
         # Extract model info from help result
@@ -2153,6 +2189,9 @@ async def generate_question_help(request: dict):
             "svg_count": help_result["svg_count"],
             "credits_remaining": new_credits,
             "daily_help_count": daily_count,
+            "student_grade_level": student_grade_level,
+            "help_grade_level": help_grade_level,
+            "user_help_preference": user_help_preference,
             "subject": subject,
             "ai_summary": {
                 "ai_model": ai_model,
@@ -2166,6 +2205,246 @@ async def generate_question_help(request: dict):
     except Exception as e:
         logger.error(f"Error generating question help: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate help: {str(e)}")
+
+
+@router.post("/generate-question-help/preview")
+async def preview_question_help_prompt(request: dict):
+    """
+    Preview the AI prompt that will be used for help generation WITHOUT calling AI.
+    This endpoint is for testing and debugging prompt construction based on grade level.
+    
+    Does NOT:
+    - Call the AI model
+    - Consume credits
+    - Check subscription limits
+    - Log usage
+    
+    Request body (same as /generate-question-help):
+    - uid: str (required) - Firebase User UID (to fetch grade level)
+    - question: str (required) - The question text
+    - correct_answer: str (required) - Correct answer for context
+    - subject_id: int (required) - Subject ID
+    - subject_name: str (required) - Subject display name
+    - user_answer: str (optional) - User's answer (when has_answered=true)
+    - has_answered: bool (optional, default=false) - Whether user answered
+    - visual_preference: str (optional, default='text') - 'text', 'json', or 'svg'
+    
+    Returns:
+    - prompt: str - The complete prompt that would be sent to AI
+    - grade_level: int - Student's grade level (or None if missing)
+    - tone_config: dict - The grade-specific tone configuration used
+    - metadata: dict - Additional context about prompt construction
+    """
+    try:
+        from app.repositories.db_service import get_user_by_uid
+        from app.repositories.knowledge_service import KnowledgeService
+        from app.utils.grade_tone_loader import GradeToneConfig
+        from app.config import (
+            FF_HELP_VISUAL_JSON_ENABLED,
+            FF_HELP_VISUAL_JSON_MAX,
+            FF_HELP_VISUAL_SVG_FROM_AI_ENABLED,
+            FF_HELP_VISUAL_SVG_FROM_AI_MAX,
+            HELP_GRADE_REDUCTION
+        )
+        
+        # Extract request data
+        uid = request.get("uid")
+        question = request.get("question")
+        correct_answer = request.get("correct_answer")
+        subject_id = request.get("subject_id")
+        subject_name = request.get("subject_name")
+        user_answer = request.get("user_answer")
+        has_answered = request.get("has_answered", False)
+        visual_preference = request.get("visual_preference", "text")
+        requested_help_grade = request.get("help_grade_level")  # NEW: Override grade level
+        
+        # Validation
+        if not all([uid, question, correct_answer, subject_id, subject_name]):
+            raise HTTPException(
+                status_code=400,
+                detail="Missing required fields: uid, question, correct_answer, subject_id, subject_name"
+            )
+        
+        # Fetch user to get grade level
+        user = get_user_by_uid(uid)
+        student_grade_level = user.get('grade_level') if user else None
+        user_help_preference = user.get('help_tone_preference') if user else None
+        
+        # Calculate help grade level (same logic as main endpoint)
+        # Priority: 1) Explicit request override, 2) User saved preference, 3) Apply reduction, 4) Use student grade
+        if requested_help_grade is not None:
+            # User explicitly requested a specific grade level
+            help_grade_level = max(1, requested_help_grade)  # Ensure minimum grade 1
+        elif user_help_preference:
+            # User has saved preference - interpret it
+            if user_help_preference == 'auto' and student_grade_level:
+                # Auto means one grade simpler
+                help_grade_level = max(1, student_grade_level - 1)
+            elif user_help_preference == 'kid':
+                help_grade_level = 'kid'
+            elif user_help_preference.isdigit():
+                help_grade_level = int(user_help_preference)
+            else:
+                # Fallback to default if invalid preference
+                help_grade_level = student_grade_level
+        elif student_grade_level is not None and HELP_GRADE_REDUCTION > 0:
+            # Apply grade reduction (e.g., Grade 6 - 1 = Grade 5 explanation)
+            help_grade_level = max(1, student_grade_level - HELP_GRADE_REDUCTION)
+        else:
+            # No reduction, use student's actual grade (or NULL defaults to 'kid')
+            help_grade_level = student_grade_level if student_grade_level else 'kid'
+        
+        # Get subject for visual limits
+        subject = KnowledgeService.get_subject_by_id(subject_id)
+        
+        if not subject:
+            raise HTTPException(status_code=404, detail=f"Subject {subject_id} not found")
+        
+        # Determine visual limits (same logic as generate_question_help)
+        subject_json_max = subject.get('visual_json_max', 3)
+        subject_svg_max = subject.get('visual_svg_max', 1)
+        
+        # Apply global overrides
+        final_json_max = min(FF_HELP_VISUAL_JSON_MAX, subject_json_max)
+        final_svg_max = min(FF_HELP_VISUAL_SVG_FROM_AI_MAX, subject_svg_max)
+        
+        # Determine visual requirements based on preference
+        if visual_preference == 'text' or not FF_HELP_VISUAL_JSON_ENABLED:
+            final_json_max = 0
+            final_svg_max = 0
+            visual_required = False
+            visual_requirement_text = "NOT ALLOWED"
+        elif visual_preference == 'json':
+            final_svg_max = 0
+            visual_required = True
+            visual_requirement_text = "JSON REQUIRED"
+        elif visual_preference == 'svg':
+            if FF_HELP_VISUAL_SVG_FROM_AI_ENABLED:
+                final_json_max = 0
+                visual_required = True
+                visual_requirement_text = "SVG REQUIRED"
+            else:
+                final_json_max = 0
+                final_svg_max = 0
+                visual_required = False
+                visual_requirement_text = "SVG DISABLED"
+        else:
+            visual_required = False
+            visual_requirement_text = "OPTIONAL"
+        
+        # Build visual instructions (same as in prompt_service.py)
+        if final_json_max == 0 and final_svg_max == 0:
+            visual_instructions = """
+**Visual Aids** (NOT ALLOWED):
+Do NOT include any visual aids. Provide text-only explanations.
+"""
+        else:
+            visual_instructions = f"""
+**Visual Aids** ({visual_requirement_text}):
+You {"MUST" if visual_required else "may"} include up to {final_json_max} JSON-based visual aids and up to {final_svg_max} AI-generated SVG aids.
+
+For JSON visuals (frontend renders these):
+- Shape primitives: {{"type": "circle", "data": {{"cx": 50, "cy": 50, "r": 30, "fill": "blue"}}}}
+- Available types: circle, rectangle, line, polygon, text, path
+- Use simple, clear visuals that genuinely aid understanding
+- Each visual should be attached to the step where it's most helpful
+
+{"For AI-generated SVG:" if final_svg_max > 0 else ""}
+{"- Include complete SVG element with viewBox, proper dimensions" if final_svg_max > 0 else ""}
+{"- Keep it simple and educational (diagrams, charts, simple illustrations)" if final_svg_max > 0 else ""}
+{"- Use clear colors and labels" if final_svg_max > 0 else ""}
+
+**CRITICAL**: Only use visuals when they genuinely help understanding. Do NOT use them as decoration.
+"""
+        
+        # Determine prompt mode
+        if has_answered and user_answer:
+            prompt_mode = "POST-ANSWER MODE: Student answered INCORRECTLY"
+            question_instruction = f"The student's incorrect answer was: {user_answer}. Focus on why this is wrong and how to get the correct answer."
+        else:
+            prompt_mode = "PRE-ANSWER MODE: Student needs help BEFORE answering"
+            question_instruction = "Generate a SIMILAR question (different numbers/scenario) and explain how to solve it. This helps them learn without giving away the exact answer."
+        
+        # Get grade-specific tone instruction
+        tone_config = GradeToneConfig.get_tone_for_grade(help_grade_level)
+        tone_instruction = tone_config.get('tone_instruction', '')
+        
+        # Build the complete prompt (same as in prompt_service.py lines 769-809)
+        prompt = f"""You are an expert {subject_name} tutor helping a student understand a question.
+
+**{prompt_mode}**
+{question_instruction}
+
+**Question:** {question}
+**Correct Answer:** {correct_answer}
+
+{visual_instructions}
+
+**Response Format (valid JSON only):**
+{{
+  "question_variant": "{question if has_answered else 'your newly generated similar question'}",
+  "help_steps": [
+    {{
+      "step_number": 1,
+      "explanation": "**Step 1: Understanding the Problem**\\n\\nMarkdown-formatted explanation..."
+    }},
+    {{
+      "step_number": 2,
+      "explanation": "**Step 2: Key Concept**\\n\\nMore markdown...",
+      "visual": {{  // OPTIONAL - only if genuinely helpful
+        "type": "json_shape",
+        "data": {{...}}
+      }}
+    }}
+  ]
+}}
+
+**Quality Guidelines:**
+1. {tone_instruction}
+2. Break down into 3-5 logical steps
+3. Include markdown formatting: **bold**, *italic*, bullet points, numbered lists
+4. Highlight key concepts and common mistakes
+5. End with a summary/takeaway
+6. Visuals: ONLY use when they genuinely aid understanding (not decorative)
+7. Avoid overwhelming the student - keep it focused and concise
+8. {"CRITICAL: In 'question_variant' field, generate a SIMILAR question with different numbers/scenario. DO NOT copy the original question!" if not has_answered else "CRITICAL: In 'question_variant' field, copy the exact question text provided above word-for-word. Do NOT write 'EXACT' or any placeholder."}
+
+Return ONLY the JSON object, no additional text.
+"""
+        
+        # Return preview data
+        return {
+            "prompt": prompt,
+            "student_grade_level": student_grade_level,
+            "help_grade_level": help_grade_level,
+            "user_help_preference": user_help_preference,
+            "tone_config": tone_config,
+            "metadata": {
+                "subject_id": subject_id,
+                "subject_name": subject_name,
+                "has_answered": has_answered,
+                "visual_preference": visual_preference,
+                "grade_reduction_applied": HELP_GRADE_REDUCTION if requested_help_grade is None and not user_help_preference else 0,
+                "requested_help_grade": requested_help_grade,
+                "visual_limits": {
+                    "json_max": final_json_max,
+                    "svg_max": final_svg_max,
+                    "subject_json_max": subject_json_max,
+                    "subject_svg_max": subject_svg_max,
+                    "global_json_max": FF_HELP_VISUAL_JSON_MAX,
+                    "global_svg_max": FF_HELP_VISUAL_SVG_FROM_AI_MAX
+                },
+                "mode": prompt_mode,
+                "tone_instruction": tone_instruction,
+                "default_grade_fallback": student_grade_level is None
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error previewing help prompt: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to preview prompt: {str(e)}")
 
 
 @router.get("/knowledge/sessions")

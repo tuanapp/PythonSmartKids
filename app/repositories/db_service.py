@@ -93,10 +93,10 @@ def get_user_by_email(email: str):
         logger.error(f"Error retrieving user by email: {e}")
         raise
 
-def update_user_profile(uid: str, name: str = None, display_name: str = None, grade_level: int = None):
+def update_user_profile(uid: str, name: str = None, display_name: str = None, grade_level: int = None, help_tone_preference: str = None):
     """Update user profile fields using the configured database provider."""
     try:
-        db_provider.update_user_profile(uid, name, display_name, grade_level)
+        db_provider.update_user_profile(uid, name, display_name, grade_level, help_tone_preference)
         logger.debug(f"Updated profile for user {uid}")
     except Exception as e:
         logger.error(f"Error updating user profile: {e}")

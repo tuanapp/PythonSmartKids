@@ -12,13 +12,14 @@ else:
     load_dotenv()  # Fallback to default .env
 
 # Database settings - PostgreSQL only
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://smartboy_dev:smartboy_dev@localhost:5432/smartboy_dev")
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+# DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://smartboy_dev:smartboy_dev@localhost:5432/smartboy_dev")
 
 # Neon PostgreSQL specific settings
 NEON_DBNAME = os.getenv("NEON_DBNAME", "smartboydb")
 NEON_USER = os.getenv("NEON_USER", "tuanapp")
 NEON_PASSWORD = os.getenv("NEON_PASSWORD", "")
-NEON_HOST = os.getenv("NEON_HOST", "localhost")
+NEON_HOST = os.getenv("NEON_HOST", "")
 NEON_SSLMODE = os.getenv("NEON_SSLMODE", "require")
 
 # OpenAI settings
@@ -80,6 +81,11 @@ FF_HELP_VISUAL_JSON_MAX = int(os.getenv("FF_HELP_VISUAL_JSON_MAX", "3"))
 # AI-generated SVG (complete SVG element from AI, experimental)
 FF_HELP_VISUAL_SVG_FROM_AI_ENABLED = os.getenv("FF_HELP_VISUAL_SVG_FROM_AI_ENABLED", "false").lower() == "true"
 FF_HELP_VISUAL_SVG_FROM_AI_MAX = int(os.getenv("FF_HELP_VISUAL_SVG_FROM_AI_MAX", "1"))
+
+# Help Grade Reduction - How many grades to reduce for simpler explanations
+# E.g., if set to 1, Grade 6 student gets Grade 5 level explanation
+# Set to 0 to disable reduction (explain at student's actual grade)
+HELP_GRADE_REDUCTION = int(os.getenv("HELP_GRADE_REDUCTION", "0"))
 
 # === Google Play Billing Configuration ===
 # Service account JSON for verifying Google Play purchases (base64 encoded)

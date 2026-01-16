@@ -41,10 +41,11 @@ class UserRegistration(BaseModel):
 
 
 class UserProfileUpdate(BaseModel):
-    """Request body for updating user profile (name, displayName, gradeLevel)"""
+    """Request body for updating user profile (name, displayName, gradeLevel, helpTonePreference)"""
     name: Optional[str] = Field(None, min_length=1, max_length=100, description="Student name")
     displayName: Optional[str] = Field(None, min_length=1, max_length=100, description="Display name")
     gradeLevel: Optional[int] = Field(None, ge=4, le=7, description="Grade level (4, 5, 6, or 7)")
+    helpTonePreference: Optional[str] = Field(None, pattern="^(auto|kid|[1-9]|1[0-2])$", description="Help explanation tone: auto, kid, or 1-12")
 
 
 # ============================================================================

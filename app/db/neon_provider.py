@@ -419,7 +419,7 @@ class NeonProvider(DatabaseProvider):
             
             cursor.execute("""
                 SELECT uid, email, name, display_name, grade_level, subscription, registration_date,
-                       is_blocked, blocked_reason, blocked_at, blocked_by, is_debug, credits
+                       is_blocked, blocked_reason, blocked_at, blocked_by, is_debug, credits, help_tone_preference
                 FROM users
                 WHERE uid = %s
             """, (uid,))
@@ -447,7 +447,7 @@ class NeonProvider(DatabaseProvider):
             
             cursor.execute("""
                 SELECT uid, email, name, display_name, grade_level, subscription, registration_date,
-                       is_blocked, blocked_reason, blocked_at, blocked_by, is_debug, credits
+                       is_blocked, blocked_reason, blocked_at, blocked_by, is_debug, credits, help_tone_preference
                 FROM users
                 WHERE email = %s
             """, (email,))
@@ -467,8 +467,8 @@ class NeonProvider(DatabaseProvider):
             logger.error(f"Error retrieving user by email: {e}")
             raise Exception(f"Database error: {e}")
 
-    def update_user_profile(self, uid: str, name: str = None, display_name: str = None, grade_level: int = None) -> None:
-        """Update user profile fields (name, display_name, grade_level)."""
+    def update_user_profile(self, uid: str, name: str = None, display_name: str = None, grade_level: int = None, help_tone_preference: str = None) -> None:
+        """Update user profile fields (name, display_name, grade_level, help_tone_preference)."""
         try:
             # Build dynamic update query based on provided fields
             updates = []
@@ -483,6 +483,9 @@ class NeonProvider(DatabaseProvider):
             if grade_level is not None:
                 updates.append("grade_level = %s")
                 params.append(grade_level)
+            if help_tone_preference is not None:
+                updates.append("help_tone_preference = %s")
+                params.append(help_tone_preference)
             
             if not updates:
                 return  # Nothing to update

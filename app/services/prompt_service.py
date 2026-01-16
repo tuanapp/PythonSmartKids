@@ -8,6 +8,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 from app.config import NEON_DBNAME, NEON_USER, NEON_PASSWORD, NEON_HOST, NEON_SSLMODE
+from app.utils.grade_tone_loader import GradeToneConfig
 
 logger = logging.getLogger(__name__)
 
@@ -600,7 +601,8 @@ class PromptService:
         subject_name: str,
         user_answer: Optional[str] = None,
         has_answered: bool = False,
-        visual_preference: str = 'text'
+        visual_preference: str = 'text',
+        student_grade_level: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Generate AI-powered step-by-step help for a knowledge question.
@@ -796,7 +798,7 @@ Add "visual" field to relevant steps:
 }}
 
 **Quality Guidelines:**
-1. Use clear, student-friendly language (appropriate for grade 1-6 students)
+1. {GradeToneConfig.get_prompt_instruction(student_grade_level)}
 2. Break down into 3-5 logical steps
 3. Include markdown formatting: **bold**, *italic*, bullet points, numbered lists
 4. Highlight key concepts and common mistakes
