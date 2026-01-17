@@ -785,11 +785,11 @@ Add "visual" field to relevant steps:
   "help_steps": [
     {{
       "step_number": 1,
-      "explanation": "**Step 1: Understanding the Problem**\\n\\nMarkdown-formatted explanation..."
+      "explanation": "**Understanding the Problem: **\\n\\nMarkdown-formatted explanation..."
     }},
     {{
       "step_number": 2,
-      "explanation": "**Step 2: Key Concept**\\n\\nMore markdown...",
+      "explanation": "**Key Concept: **\\n\\nMore markdown...",
       "visual": {{  // OPTIONAL - only if genuinely helpful
         "type": "json_shape",
         "data": {{...}}
