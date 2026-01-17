@@ -780,6 +780,7 @@ Add "visual" field to relevant steps:
 
 **Response Format (valid JSON only):**
 {{
+  "complexity_assessment": "simple|moderate|complex",  // REQUIRED: Your assessment of this question's inherent complexity
   "question_variant": "{question if has_answered else 'your newly generated similar question'}",  // If post-answer: copy the question text exactly as provided. If pre-answer: write your new similar question here
   "help_steps": [
     {{
@@ -797,9 +798,26 @@ Add "visual" field to relevant steps:
   ]
 }}
 
+**Complexity Assessment (analyze FIRST, then use to guide your explanation):**
+Assess the question's inherent complexity based on:
+- Number of concepts/operations involved
+- Level of abstraction (concrete vs. abstract)
+- Prerequisite knowledge required
+- Problem-solving complexity (recall < application < analysis < synthesis)
+
+Complexity categories (extensible for future levels):
+- **simple**: Single concept, basic recall, straightforward calculations (e.g., definitions, simple arithmetic)
+- **moderate**: Multi-step reasoning, concept application, requires connecting ideas
+- **complex**: Multi-concept integration, abstract reasoning, problem-solving, synthesis
+
 **Quality Guidelines:**
 1. {GradeToneConfig.get_prompt_instruction(student_grade_level)}
-2. Break down into 3-5 logical steps
+2. **Step count freedom**: Choose ANY number of steps (1 to N) that optimizes understanding for this student's help_grade level
+   - IMPORTANT: Step count should serve CLARITY, not follow rigid rules
+   - Even "simple" questions may benefit from 3-4 steps if that improves comprehension
+   - Even "complex" questions may need just 2-3 well-explained steps
+   - Grade level affects ONLY language/tone, NOT step count
+   - Let the question's pedagogical needs guide your decision
 3. Include markdown formatting: **bold**, *italic*, bullet points, numbered lists
 4. Highlight key concepts and common mistakes
 5. End with a summary/takeaway
@@ -907,7 +925,16 @@ Return ONLY the JSON object, no additional text.
                             visual_count = json_used
                             svg_count = svg_used
                         
-                        logger.info(f"Help generated successfully with {model_name} for uid={uid}, subject={subject_name}, visuals: JSON={visual_count}, SVG={svg_count}")
+                        # Extract complexity assessment and step count
+                        complexity_assessment = help_data.get("complexity_assessment")
+                        step_count = len(help_data["help_steps"])
+                        
+                        logger.info(
+                            f"Help generated successfully with {model_name} for uid={uid}, "
+                            f"subject={subject_name}, steps={step_count}, "
+                            f"complexity={complexity_assessment or 'not_assessed'}, "
+                            f"visuals: JSON={visual_count}, SVG={svg_count}"
+                        )
                         
                         # Return successful result with full AI request/response for logging
                         return {
@@ -916,6 +943,8 @@ Return ONLY the JSON object, no additional text.
                             "has_answered": has_answered,
                             "visual_count": visual_count,
                             "svg_count": svg_count,
+                            "complexity_assessment": complexity_assessment,  # NEW: AI-assessed complexity
+                            "step_count": step_count,  # NEW: Explicit step count
                             "ai_model": model_name,
                             "used_fallback": is_fallback_attempt,
                             "response_time_ms": response_time_ms,

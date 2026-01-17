@@ -2250,6 +2250,14 @@ async def generate_question_help(request: dict):
         # Get updated daily count
         daily_count = prompt_service.get_daily_help_count(uid)
         
+        # Get human-readable tone description
+        if help_grade_level == 'kid':
+            help_tone_description = "Simplest (Kid-friendly)"
+        elif isinstance(help_grade_level, int):
+            help_tone_description = f"Grade {help_grade_level} level"
+        else:
+            help_tone_description = "Default"
+        
         return {
             "message": "Help generated successfully",
             "help_steps": help_result["help_steps"],
@@ -2257,6 +2265,9 @@ async def generate_question_help(request: dict):
             "has_answered": help_result["has_answered"],
             "visual_count": help_result["visual_count"],
             "svg_count": help_result["svg_count"],
+            "complexity_assessment": help_result.get("complexity_assessment"),  # NEW: AI-assessed complexity
+            "step_count": help_result.get("step_count", len(help_result["help_steps"])),  # NEW: Explicit step count
+            "help_tone": help_tone_description,  # NEW: Human-readable tone description
             "credits_remaining": new_credits,
             "daily_help_count": daily_count,
             "student_grade_level": student_grade_level,

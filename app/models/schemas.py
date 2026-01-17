@@ -164,6 +164,9 @@ class QuestionHelpResponse(BaseModel):
     max_daily_help: int
     visual_count: int  # Number of JSON-based visuals
     svg_count: int  # Number of AI-generated SVGs
+    complexity_assessment: Optional[str] = None  # AI-assessed question complexity: 'simple', 'moderate', 'complex' (extensible, see docs/HELP_COMPLEXITY_LEVELS.md)
+    step_count: int = 0  # Number of help steps provided
+    help_tone: str = "Default"  # Human-readable tone description (e.g., "Grade 5 level", "Simplest (Kid-friendly)")
 
 
 # ============================================================================
