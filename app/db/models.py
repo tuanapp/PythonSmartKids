@@ -98,6 +98,12 @@ class User(Base):
     # Debug mode - when True, enables API debug panel in frontend
     is_debug = Column(Boolean, default=False, nullable=False)
     
+    # Help tone preference for AI explanations
+    help_tone_preference = Column(String(10), nullable=True)
+    
+    # Credit expiry tracking
+    credits_expire_at = Column(DateTime(timezone=True), nullable=True)
+    
     # Timestamps (auto-managed by database)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -199,6 +205,22 @@ class KnowledgeQuestionAttempt(Base):
     
     # Relationships
     model = relationship("LLMModel", back_populates="knowledge_attempts")
+
+
+class UserDevice(Base):
+    """SQLAlchemy model for user devices and FCM tokens."""
+    __tablename__ = "user_devices"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(String(255), ForeignKey('users.uid', ondelete='CASCADE'), nullable=False, index=True)
+    device_id = Column(String(255), nullable=False)  # Stable device identifier from app
+    platform = Column(String(50), nullable=False, default='android')
+    fcm_token = Column(String(500), nullable=True, index=True)
+    last_seen_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_token_sync_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    is_enabled = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
 def get_engine():

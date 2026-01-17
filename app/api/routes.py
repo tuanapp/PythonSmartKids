@@ -5,6 +5,7 @@ from app.services.ai_service import generate_practice_questions
 from app.services.prompt_service import PromptService
 from app.services.user_blocking_service import UserBlockingService
 from app.services.billing_service import billing_service
+from app.services.fcm_service import fcm_service
 from app.validators.billing_validators import (
     VerifyPurchaseRequest, VerifyPurchaseResponse,
     ProcessPurchaseRequest, ProcessPurchaseResponse,
@@ -247,8 +248,59 @@ async def check_user_status(user_uid: str):
         return {
             "user_uid": user_uid,
             "is_blocked": False,
-            "blocked_reason": ""
+            "blocked_reason": None
         }
+
+
+@router.post("/users/{user_uid}/device-token")
+async def register_device_token(
+    user_uid: str,
+    device_id: str = Header(..., alias="X-Device-Id"),
+    fcm_token: str = Header(..., alias="X-FCM-Token"),
+    platform: str = Header(default="android", alias="X-Platform")
+):
+    """
+    Register or update FCM device token for push notifications.
+    
+    Args:
+        user_uid: Firebase User UID
+        device_id: Stable device identifier (from X-Device-Id header)
+        fcm_token: FCM registration token (from X-FCM-Token header)
+        platform: Device platform - 'android', 'ios', 'web' (from X-Platform header)
+    
+    Returns:
+        Registration result
+    """
+    try:
+        # Validate user exists
+        user_data = db_service.get_user_by_uid(user_uid)
+        if not user_data:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Register device token
+        result = fcm_service.register_device_token(
+            uid=user_uid,
+            device_id=device_id,
+            fcm_token=fcm_token,
+            platform=platform
+        )
+        
+        if result['success']:
+            logger.info(f"Registered device token for user {user_uid}, device {device_id}")
+            return {
+                "success": True,
+                "message": result['message']
+            }
+        else:
+            logger.error(f"Failed to register device token: {result.get('error')}")
+            raise HTTPException(status_code=500, detail=result.get('error', 'Unknown error'))
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error registering device token for {user_uid}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to register device token: {str(e)}")
+
 
 @router.get("/users/{user_uid}/blocking-history")
 async def get_blocking_history(
@@ -359,6 +411,24 @@ async def adjust_user_credits(
         )
         
         logger.info(f"Admin adjusted credits for {user_uid}: {result['old_credits']} -> {result['new_credits']} (reason: {request.reason})")
+        
+        # Send FCM notification to user's devices (non-blocking, with retries)
+        try:
+            is_upgrade = request.amount > 0
+            fcm_result = await fcm_service.send_credit_notification(
+                uid=user_uid,
+                old_credits=result['old_credits'],
+                new_credits=result['new_credits'],
+                is_upgrade=is_upgrade,
+                max_retries=2
+            )
+            if fcm_result['success']:
+                logger.info(f"FCM notification sent to {fcm_result['sent_count']} device(s) for user {user_uid}")
+            else:
+                logger.warning(f"FCM notification failed for user {user_uid}: {fcm_result.get('error')}")
+        except Exception as fcm_error:
+            # Log but don't fail the request if FCM fails
+            logger.error(f"Error sending FCM notification for credit adjustment: {fcm_error}")
         
         return {
             "success": True,

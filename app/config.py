@@ -92,5 +92,8 @@ HELP_GRADE_REDUCTION = int(os.getenv("HELP_GRADE_REDUCTION", "0"))
 GOOGLE_PLAY_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON", "")
 GOOGLE_PLAY_PACKAGE_NAME = os.getenv("GOOGLE_PLAY_PACKAGE_NAME", "tuanorg.smartboy")
 
+# Configure Firebase Service Account - Push Notifications 
+FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "")
+
 # Admin key for administrative endpoints
 ADMIN_KEY = os.getenv("ADMIN_KEY", "dev-admin-key")
