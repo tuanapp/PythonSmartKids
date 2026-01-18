@@ -45,11 +45,15 @@ class A2UIHelpService:
         },
         "DivideBothSides": {
             "description": "Division operation applied to both sides of equation (shows intermediate step)",
-            "use_cases": ["division", "solving equations with coefficients", "isolate variable by division", "divide both sides"]
+            "use_cases": ["solving equations with coefficients", "isolate variable by division", "divide both sides", "algebraic equations"]
         },
         "MultiplyBothSides": {
             "description": "Multiplication operation applied to both sides of equation (shows intermediate step)",
-            "use_cases": ["multiplication", "solving fractions", "isolate variable by multiplication", "multiply both sides"]
+            "use_cases": ["solving fractions", "isolate variable by multiplication", "multiply both sides", "algebraic equations"]
+        },
+        "SimpleDivision": {
+            "description": "Simple division operation showing dividend ÷ divisor = quotient (NOT for equations)",
+            "use_cases": ["division", "simple division", "dividing numbers", "sharing equally", "division problems", "how many in each group"]
         },
         "AngleProtractor": {
             "description": "Protractor showing angle measurement with degree markings and angle classification",
@@ -131,18 +135,27 @@ You MUST generate declarative A2UI components for visual explanations.
    - Example: {{"RectangleArea": {{"length": 8, "width": 5, "showFormula": true, "showGrid": true, "unit": "cm"}}}}
 
 8. **DivideBothSides** - Division operation on both sides of equation
-   - Use for: Solving equations like 2x = 12 (divide both sides by 2)
+   - Use for: Solving algebraic equations like 2x = 12 (divide both sides by 2), coefficient isolation
+   - NOT for simple division problems (20 ÷ 4) - use SimpleDivision instead
    - Props: left (tokens array), right (tokens array), divisor (number), resultLeft (tokens array), resultRight (tokens array), annotation? (string)
    - Shows: Original equation → Division symbols on both sides → Simplified result
    - Example: {{{{"DivideBothSides": {{{{"left": [{{{{"id": "t1", "text": "2x"}}}}], "right": [{{{{"id": "t2", "text": "12"}}}}], "divisor": 2, "resultLeft": [{{{{"id": "t3", "text": "x"}}}}], "resultRight": [{{{{"id": "t4", "text": "6"}}}}], "annotation": "Divide both sides by 2 to isolate x"}}}}}}}}
 
 9. **MultiplyBothSides** - Multiplication operation on both sides of equation
-   - Use for: Solving equations like x/2 = 5 (multiply both sides by 2)
+   - Use for: Solving algebraic equations like x/2 = 5 (multiply both sides by 2), fraction isolation
+   - NOT for simple multiplication - only for equations
    - Props: left (tokens array), right (tokens array), multiplier (number), resultLeft (tokens array), resultRight (tokens array), annotation? (string)
    - Shows: Original equation → Multiplication symbols on both sides → Simplified result
    - Example: {{{{"MultiplyBothSides": {{{{"left": [{{{{"id": "t1", "text": "x/2"}}}}], "right": [{{{{"id": "t2", "text": "5"}}}}], "multiplier": 2, "resultLeft": [{{{{"id": "t3", "text": "x"}}}}], "resultRight": [{{{{"id": "t4", "text": "10"}}}}], "annotation": "Multiply both sides by 2 to isolate x"}}}}}}}}
 
-10. **ExplainCard**, **StepList**, **MathText** - Layout/narrative primitives
+10. **SimpleDivision** - Simple division operation (NOT for equations)
+   - Use for: Basic division problems like "20 cm ÷ 4 = 5 cm", sharing/grouping, simple division word problems
+   - NOT for algebraic equations - use DivideBothSides instead
+   - Props: dividend (number), divisor (number), quotient (number), remainder? (number), unit? (string), annotation? (string), showSteps? (boolean)
+   - Shows: dividend ÷ divisor = quotient with visual step-by-step breakdown
+   - Example: {{{{"SimpleDivision": {{{{"dividend": 20, "divisor": 4, "quotient": 5, "unit": "cm", "annotation": "Divide 20 by 4 to find the length of each part", "showSteps": true}}}}}}}}
+
+11. **ExplainCard**, **StepList**, **MathText** - Layout/narrative primitives
 
 **A2UI Message Format (JSONL):**
 
@@ -406,6 +419,40 @@ You MUST return A2UI messages as an array of JSON objects. Each help step should
 ]
 ```
 
+**Example for "A ruler is 20 cm long. If it is divided into 4 parts, how long is each part?" (using SimpleDivision):**
+
+```json
+[
+  {{
+    "surfaceUpdate": {{
+      "surfaceId": "help",
+      "components": [
+        {{
+          "id": "simple-div",
+          "component": {{
+            "SimpleDivision": {{
+              "dividend": 20,
+              "divisor": 4,
+              "quotient": 5,
+              "unit": "cm",
+              "annotation": "Divide the total length by the number of parts",
+              "showSteps": true
+            }}
+          }}
+        }}
+      ]
+    }}
+  }},
+  {{
+    "beginRendering": {{
+      "surfaceId": "help",
+      "catalogId": "{self.CATALOG_ID}",
+      "root": "simple-div"
+    }}
+  }}
+]
+```
+
 **Example for "What type of angle is 65 degrees?" (using AngleProtractor):**
 
 ```json
@@ -485,6 +532,7 @@ You MUST return A2UI messages as an array of JSON objects. Each help step should
 
 **Component Selection Guide:**
 
+- **Simple division** (20 ÷ 4, sharing/grouping) → **SimpleDivision**
 - **Addition/Subtraction in equations** (moving terms across =) → **MoveAcrossEquals**
 - **Division in equations** (coefficient like 2x = 12) → **DivideBothSides**
 - **Multiplication in equations** (fraction like x/2 = 5) → **MultiplyBothSides**
@@ -498,10 +546,16 @@ You MUST return A2UI messages as an array of JSON objects. Each help step should
 - Multi-step → Combine multiple components in sequence
 
 **CRITICAL: Choose the right component for the operation:**
+- Use **SimpleDivision** for basic division problems (20 ÷ 4 = 5, sharing into groups, division word problems)
+- Use **DivideBothSides** ONLY for algebraic equations where you divide both sides (2x = 12)
+- Use **MultiplyBothSides** ONLY for algebraic equations where you multiply both sides (x/2 = 5)
 - Use **MoveAcrossEquals** ONLY for adding/subtracting terms across equals (sign changes)
-- Use **DivideBothSides** for division operations (both sides divided by same number)
-- Use **MultiplyBothSides** for multiplication operations (both sides multiplied by same number)
 - For "2x + 5 = 15": Step 1 uses MoveAcrossEquals (+5 → -5), Step 2 uses DivideBothSides (÷2)
+
+**DO NOT use DivideBothSides or MultiplyBothSides for non-equation problems!**
+- ❌ WRONG: Using DivideBothSides for "20 cm ÷ 4 = 5 cm" (not an equation)
+- ✅ CORRECT: Using SimpleDivision for "20 cm ÷ 4 = 5 cm" (simple division)
+- ✅ CORRECT: Using DivideBothSides for "2x = 12" (algebraic equation)
 
 **Integration with help_steps:**
 
