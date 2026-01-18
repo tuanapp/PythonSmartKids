@@ -908,6 +908,7 @@ Return ONLY the JSON object, no additional text.
                         visual_count = 0
                         svg_count = 0
                         a2ui_count = 0
+                        a2ui_components_used = []  # Track component names per step
                         
                         for step in help_data["help_steps"]:
                             if "visual" in step and step["visual"]:
@@ -926,7 +927,13 @@ Return ONLY the JSON object, no additional text.
                                         
                                         if validation["valid"]:
                                             a2ui_count += validation["component_count"]
-                                            logger.info(f"Valid A2UI in step {step['step_number']}: {validation['component_count']} components")
+                                            
+                                            # Extract component names for this step
+                                            step_components = a2ui_help_service.extract_component_names(a2ui_messages)
+                                            if step_components:
+                                                a2ui_components_used.extend(step_components)
+                                            
+                                            logger.info(f"Valid A2UI in step {step['step_number']}: {validation['component_count']} components - {step_components}")
                                         else:
                                             logger.warning(f"Invalid A2UI in step {step['step_number']}: {validation['error']}")
                                             # Remove invalid A2UI visual
@@ -966,7 +973,8 @@ Return ONLY the JSON object, no additional text.
                             f"Help generated successfully with {model_name} for uid={uid}, "
                             f"subject={subject_name}, steps={step_count}, "
                             f"complexity={complexity_assessment or 'not_assessed'}, "
-                            f"visuals: JSON={visual_count}, SVG={svg_count}, A2UI={a2ui_count}"
+                            f"visuals: JSON={visual_count}, SVG={svg_count}, A2UI={a2ui_count}, "
+                            f"a2ui_components={a2ui_components_used}"
                         )
                         
                         # Return successful result with full AI request/response for logging
@@ -977,6 +985,7 @@ Return ONLY the JSON object, no additional text.
                             "visual_count": visual_count,
                             "svg_count": svg_count,
                             "a2ui_count": a2ui_count,
+                            "a2ui_components_used": a2ui_components_used,  # NEW: List of component names per step
                             "complexity_assessment": complexity_assessment,  # NEW: AI-assessed complexity
                             "step_count": step_count,  # NEW: Explicit step count
                             "ai_model": model_name,

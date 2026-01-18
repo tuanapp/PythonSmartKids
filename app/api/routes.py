@@ -2277,7 +2277,8 @@ async def generate_question_help(request: dict):
             "ai_summary": {
                 "ai_model": ai_model,
                 "generation_time_ms": response_time_ms,
-                "used_fallback": used_fallback
+                "used_fallback": used_fallback,
+                "a2ui_components_used": help_result.get("a2ui_components_used", [])  # NEW: A2UI component names per step
             }
         }
         

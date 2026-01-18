@@ -16,8 +16,8 @@ class A2UIHelpService:
     # Component vocabulary for Grade 6-8 math
     COMPONENT_CATALOG = {
         "MoveAcrossEquals": {
-            "description": "Algebra transposition - circle term, show arrow moving across equals",
-            "use_cases": ["solving equations", "variable isolation", "algebra"]
+            "description": "Algebra transposition - circle term, show arrow moving across equals (ADDITION/SUBTRACTION ONLY)",
+            "use_cases": ["moving terms across equals", "addition in equations", "subtraction in equations", "sign changes", "variable isolation by add/subtract"]
         },
         "NumberLineJump": {
             "description": "Number line with jumps and arcs",
@@ -42,6 +42,14 @@ class A2UIHelpService:
         "RectangleArea": {
             "description": "Rectangle with grid overlay showing area calculation",
             "use_cases": ["area", "rectangle area", "area of rectangle", "unit squares", "square units"]
+        },
+        "DivideBothSides": {
+            "description": "Division operation applied to both sides of equation (shows intermediate step)",
+            "use_cases": ["division", "solving equations with coefficients", "isolate variable by division", "divide both sides"]
+        },
+        "MultiplyBothSides": {
+            "description": "Multiplication operation applied to both sides of equation (shows intermediate step)",
+            "use_cases": ["multiplication", "solving fractions", "isolate variable by multiplication", "multiply both sides"]
         },
         # Narrative/layout primitives
         "ExplainCard": {
@@ -86,8 +94,11 @@ You MUST generate declarative A2UI components for visual explanations.
 **Available Components (from catalog {self.CATALOG_ID}):**
 
 1. **MoveAcrossEquals** - Show equation transposition with circled term + curved arrow
-   - Use for: Solving equations, moving terms across =, sign changes
+   - Use for: Moving terms across = (ADDITION/SUBTRACTION ONLY), sign changes (+ becomes -, - becomes +)
+   - NOT for division/multiplication - use DivideBothSides or MultiplyBothSides instead
    - Props: initial (equation with tokens), final (equation after move), move (which token), emphasis (circle/box), annotation (arrow)
+   - CRITICAL: "left" and "right" arrays represent the two sides of the equation. DO NOT include "=" in either array. The equals sign is automatically rendered between them.
+   - Example structure: {{{{"left": [{{{{"id": "t1", "text": "2x"}}}}], "right": [{{{{"id": "t2", "text": "10"}}}}]}}}} renders as "2x = 10"
 
 2. **NumberLineJump** - Number line with labeled jumps
    - Use for: Addition/subtraction, integers, distance, inequalities
@@ -115,7 +126,19 @@ You MUST generate declarative A2UI components for visual explanations.
    - Props: length (number), width (number), showFormula? (boolean, default true), showGrid? (boolean, default true), unit? (string, default "cm")
    - Example: {{"RectangleArea": {{"length": 8, "width": 5, "showFormula": true, "showGrid": true, "unit": "cm"}}}}
 
-8. **ExplainCard**, **StepList**, **MathText** - Layout/narrative primitives
+8. **DivideBothSides** - Division operation on both sides of equation
+   - Use for: Solving equations like 2x = 12 (divide both sides by 2)
+   - Props: left (tokens array), right (tokens array), divisor (number), resultLeft (tokens array), resultRight (tokens array), annotation? (string)
+   - Shows: Original equation → Division symbols on both sides → Simplified result
+   - Example: {{{{"DivideBothSides": {{{{"left": [{{{{"id": "t1", "text": "2x"}}}}], "right": [{{{{"id": "t2", "text": "12"}}}}], "divisor": 2, "resultLeft": [{{{{"id": "t3", "text": "x"}}}}], "resultRight": [{{{{"id": "t4", "text": "6"}}}}], "annotation": "Divide both sides by 2 to isolate x"}}}}}}}}
+
+9. **MultiplyBothSides** - Multiplication operation on both sides of equation
+   - Use for: Solving equations like x/2 = 5 (multiply both sides by 2)
+   - Props: left (tokens array), right (tokens array), multiplier (number), resultLeft (tokens array), resultRight (tokens array), annotation? (string)
+   - Shows: Original equation → Multiplication symbols on both sides → Simplified result
+   - Example: {{{{"MultiplyBothSides": {{{{"left": [{{{{"id": "t1", "text": "x/2"}}}}], "right": [{{{{"id": "t2", "text": "5"}}}}], "multiplier": 2, "resultLeft": [{{{{"id": "t3", "text": "x"}}}}], "resultRight": [{{{{"id": "t4", "text": "10"}}}}], "annotation": "Multiply both sides by 2 to isolate x"}}}}}}}}
+
+10. **ExplainCard**, **StepList**, **MathText** - Layout/narrative primitives
 
 **A2UI Message Format (JSONL):**
 
@@ -138,18 +161,18 @@ You MUST return A2UI messages as an array of JSON objects. Each help step should
             "MoveAcrossEquals": {{
               "initial": {{
                 "left": [
-                  {{"id": "t1", "text": "-4x"}},
-                  {{"id": "t2", "text": "+"}},
-                  {{"id": "t3", "text": "7"}}
+                  {{{{"id": "t1", "text": "-4x"}}}},
+                  {{{{"id": "t2", "text": "+"}}}},
+                  {{{{"id": "t3", "text": "7"}}}}
                 ],
-                "right": [{{"id": "t4", "text": "15"}}]
+                "right": [{{{{"id": "t4", "text": "15"}}}}]
               }},
               "final": {{
-                "left": [{{"id": "t1b", "text": "-4x"}}],
+                "left": [{{{{"id": "t1b", "text": "-4x"}}}}],
                 "right": [
-                  {{"id": "t4b", "text": "15"}},
-                  {{"id": "t2b", "text": "-"}},
-                  {{"id": "t3b", "text": "7"}}
+                  {{{{"id": "t4b", "text": "15"}}}},
+                  {{{{"id": "t2b", "text": "-"}}}},
+                  {{{{"id": "t3b", "text": "7"}}}}
                 ]
               }},
               "move": {{
@@ -249,6 +272,136 @@ You MUST return A2UI messages as an array of JSON objects. Each help step should
 ]
 ```
 
+**Example for "Solve 2y = 12" (division):**
+
+```json
+[
+  {{
+    "surfaceUpdate": {{
+      "surfaceId": "help",
+      "components": [
+        {{
+          "id": "divide-viz",
+          "component": {{
+            "MoveAcrossEquals": {{
+              "initial": {{
+                "left": [
+                  {{{{"id": "t1", "text": "2"}}}},
+                  {{{{"id": "t2", "text": "y"}}}}
+                ],
+                "right": [{{{{"id": "t3", "text": "12"}}}}]
+              }},
+              "final": {{
+                "left": [{{{{"id": "t2b", "text": "y"}}}}],
+                "right": [{{{{"id": "t3b", "text": "6"}}}}]
+              }},
+              "move": {{
+                "tokenId": "t1",
+                "toSide": "right",
+                "operatorChange": "*->/"
+              }},
+              "emphasis": {{
+                "shape": "circle",
+                "tokenId": "t1"
+              }},
+              "annotation": {{
+                "arrow": {{
+                  "fromTokenId": "t1",
+                  "toTokenId": "t3b",
+                  "style": "curve"
+                }}
+              }}
+            }}
+          }}
+        }}
+      ]
+    }}
+  }},
+  {{
+    "beginRendering": {{
+      "surfaceId": "help",
+      "catalogId": "{self.CATALOG_ID}",
+      "root": "divide-viz"
+    }}
+  }}
+]
+```
+
+**Example for "Solve 3y = 24" (using DivideBothSides):**
+
+```json
+[
+  {{
+    "surfaceUpdate": {{
+      "surfaceId": "help",
+      "components": [
+        {{
+          "id": "divide-step",
+          "component": {{
+            "DivideBothSides": {{
+              "left": [
+                {{{{"id": "t1", "text": "3"}}}},
+                {{{{"id": "t2", "text": "y"}}}}
+              ],
+              "right": [{{{{"id": "t3", "text": "24"}}}}],
+              "divisor": 3,
+              "resultLeft": [{{{{"id": "t4", "text": "y"}}}}],
+              "resultRight": [{{{{"id": "t5", "text": "8"}}}}],
+              "annotation": "Divide both sides by 3 to isolate y"
+            }}
+          }}
+        }}
+      ]
+    }}
+  }},
+  {{
+    "beginRendering": {{
+      "surfaceId": "help",
+      "catalogId": "{self.CATALOG_ID}",
+      "root": "divide-step"
+    }}
+  }}
+]
+```
+
+**Example for "Solve x/2 = 7" (using MultiplyBothSides):**
+
+```json
+[
+  {{
+    "surfaceUpdate": {{
+      "surfaceId": "help",
+      "components": [
+        {{
+          "id": "multiply-step",
+          "component": {{
+            "MultiplyBothSides": {{
+              "left": [
+                {{{{"id": "t1", "text": "x"}}}},
+                {{{{"id": "t2", "text": "/"}}}},
+                {{{{"id": "t3", "text": "2"}}}}
+              ],
+              "right": [{{{{"id": "t4", "text": "7"}}}}],
+              "multiplier": 2,
+              "resultLeft": [{{{{"id": "t5", "text": "x"}}}}],
+              "resultRight": [{{{{"id": "t6", "text": "14"}}}}],
+              "annotation": "Multiply both sides by 2 to isolate x"
+            }}
+          }}
+        }}
+      ]
+    }}
+  }},
+  {{
+    "beginRendering": {{
+      "surfaceId": "help",
+      "catalogId": "{self.CATALOG_ID}",
+      "root": "multiply-step"
+    }}
+  }}
+]
+```
+
 **Critical Rules:**
 
 1. **Tokenization**: For equations, give each token a unique `id` (e.g., t1, t2, t3)
@@ -261,13 +414,22 @@ You MUST return A2UI messages as an array of JSON objects. Each help step should
 
 **Component Selection Guide:**
 
-- Algebra equations → **MoveAcrossEquals**
+- **Addition/Subtraction in equations** (moving terms across =) → **MoveAcrossEquals**
+- **Division in equations** (coefficient like 2x = 12) → **DivideBothSides**
+- **Multiplication in equations** (fraction like x/2 = 5) → **MultiplyBothSides**
+- **Multi-step equations** → Combine components (e.g., MoveAcrossEquals first, then DivideBothSides)
 - Addition/subtraction/integers → **NumberLineJump**
 - Fractions/ratios/percent → **BarModel** or **FractionSimplify**
 - Proportions/scaling → **RatioTable**
 - Rectangle perimeter → **RectanglePerimeter** (PREFERRED for perimeter questions)
 - Rectangle area → **RectangleArea** (PREFERRED for area questions)
 - Multi-step → Combine multiple components in sequence
+
+**CRITICAL: Choose the right component for the operation:**
+- Use **MoveAcrossEquals** ONLY for adding/subtracting terms across equals (sign changes)
+- Use **DivideBothSides** for division operations (both sides divided by same number)
+- Use **MultiplyBothSides** for multiplication operations (both sides multiplied by same number)
+- For "2x + 5 = 15": Step 1 uses MoveAcrossEquals (+5 → -5), Step 2 uses DivideBothSides (÷2)
 
 **Integration with help_steps:**
 
@@ -494,6 +656,41 @@ Generate rich, educational A2UI visualizations for {subject_name} concepts.
         except Exception as e:
             logger.error(f"Error extracting A2UI messages: {e}")
             return None
+    
+    def extract_component_names(
+        self,
+        messages: List[Dict[str, Any]]
+    ) -> List[str]:
+        """
+        Extract component names from A2UI messages.
+        
+        Args:
+            messages: Array of A2UI messages
+            
+        Returns:
+            List of component names (e.g., ["MoveAcrossEquals", "DivideBothSides"])
+        """
+        component_names = []
+        
+        try:
+            for msg in messages:
+                if "surfaceUpdate" in msg:
+                    components = msg.get("surfaceUpdate", {}).get("components", [])
+                    
+                    for comp in components:
+                        comp_obj = comp.get("component", {})
+                        
+                        # Extract the component type (should be a single key)
+                        if isinstance(comp_obj, dict) and len(comp_obj) > 0:
+                            # Get the first (and should be only) key
+                            component_type = list(comp_obj.keys())[0]
+                            component_names.append(component_type)
+            
+            return component_names
+            
+        except Exception as e:
+            logger.error(f"Error extracting component names: {e}")
+            return []
 
 
 # Singleton instance
