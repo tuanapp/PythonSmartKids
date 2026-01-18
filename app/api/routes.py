@@ -1701,6 +1701,7 @@ async def generate_knowledge_questions(request: dict):
     level = request.get('level')
     is_live = request.get('is_live', 1)
     focus_weak_areas = request.get('focus_weak_areas', False)  # Default to fresh questions
+    document_ids = request.get('document_ids')  # Optional list of specific document IDs to use
     
     if not uid:
         raise HTTPException(status_code=400, detail="uid is required")
@@ -1761,11 +1762,44 @@ async def generate_knowledge_questions(request: dict):
         
         # Get knowledge documents
         user_grade = user_data.get("grade_level")
-        knowledge_docs = KnowledgeService.get_knowledge_documents(
-            subject_id,
-            user_grade,
-            level
-        )
+        
+        # If specific document IDs are provided, fetch and validate them
+        if document_ids and len(document_ids) > 0:
+            # Validate that document_ids is a list
+            if not isinstance(document_ids, list):
+                raise HTTPException(status_code=400, detail="document_ids must be a list of integers")
+            
+            # Fetch all documents for validation
+            all_docs = KnowledgeService.get_knowledge_documents(
+                subject_id,
+                user_grade,
+                level
+            )
+            
+            # Filter to only requested documents and validate they belong to this subject
+            knowledge_docs = []
+            for doc_id in document_ids:
+                matching_doc = next((d for d in all_docs if d['id'] == doc_id), None)
+                if matching_doc:
+                    knowledge_docs.append(matching_doc)
+                else:
+                    logger.warning(f"Document ID {doc_id} not found for subject {subject_id}, skipping")
+            
+            # If none of the requested documents are valid, raise error
+            if not knowledge_docs:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"None of the requested documents belong to subject {subject_id}"
+                )
+                
+            logger.info(f"Using {len(knowledge_docs)} selected documents out of {len(document_ids)} requested")
+        else:
+            # No specific documents requested - use all available documents
+            knowledge_docs = KnowledgeService.get_knowledge_documents(
+                subject_id,
+                user_grade,
+                level
+            )
         
         if not knowledge_docs:
             # No knowledge documents found - use LLM-only generation
@@ -1845,9 +1879,15 @@ async def generate_knowledge_questions(request: dict):
         # Combine knowledge content (use first document or combine multiple)
         knowledge_content = knowledge_docs[0]['content']
         if len(knowledge_docs) > 1:
-            # Combine first portions of multiple documents (no summary field in production)
-            content_excerpts = [doc['content'][:500] for doc in knowledge_docs[:3]]
+            # If user selected specific documents, use more content from each (up to 1500 chars)
+            # Otherwise use shorter excerpts (500 chars) to avoid overwhelming the AI
+            char_limit = 1500 if document_ids else 500
+            max_docs = len(knowledge_docs) if document_ids else min(3, len(knowledge_docs))
+            
+            content_excerpts = [doc['content'][:char_limit] for doc in knowledge_docs[:max_docs]]
             knowledge_content = "\n\n---\n\n".join(content_excerpts)
+            
+            logger.info(f"Combined {len(content_excerpts)} documents (char_limit={char_limit}, user_selected={bool(document_ids)})")
         
         # Get user's attempt history for personalization
         user_history = KnowledgeService.get_user_knowledge_attempts(uid, subject_id, limit=20)
