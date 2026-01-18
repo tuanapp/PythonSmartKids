@@ -51,6 +51,10 @@ class A2UIHelpService:
             "description": "Multiplication operation applied to both sides of equation (shows intermediate step)",
             "use_cases": ["multiplication", "solving fractions", "isolate variable by multiplication", "multiply both sides"]
         },
+        "AngleProtractor": {
+            "description": "Protractor showing angle measurement with degree markings and angle classification",
+            "use_cases": ["angles", "measuring angles", "angle types", "acute", "obtuse", "right angle", "straight angle", "protractor", "degrees"]
+        },
         # Narrative/layout primitives
         "ExplainCard": {
             "description": "Container with title and learning objective",
@@ -402,6 +406,73 @@ You MUST return A2UI messages as an array of JSON objects. Each help step should
 ]
 ```
 
+**Example for "What type of angle is 65 degrees?" (using AngleProtractor):**
+
+```json
+[
+  {{
+    "surfaceUpdate": {{
+      "surfaceId": "help",
+      "components": [
+        {{
+          "id": "angle-viz",
+          "component": {{
+            "AngleProtractor": {{
+              "angle": 65,
+              "showProtractor": true,
+              "showArc": true,
+              "showLabel": true,
+              "annotation": "An angle between 0° and 90° is called an acute angle"
+            }}
+          }}
+        }}
+      ]
+    }}
+  }},
+  {{
+    "beginRendering": {{
+      "surfaceId": "help",
+      "catalogId": "{self.CATALOG_ID}",
+      "root": "angle-viz"
+    }}
+  }}
+]
+```
+
+**Example for "Identify a right angle" (using AngleProtractor):**
+
+```json
+[
+  {{
+    "surfaceUpdate": {{
+      "surfaceId": "help",
+      "components": [
+        {{
+          "id": "right-angle-viz",
+          "component": {{
+            "AngleProtractor": {{
+              "angle": 90,
+              "showProtractor": true,
+              "showArc": true,
+              "showLabel": true,
+              "angleType": "right",
+              "annotation": "A right angle is exactly 90 degrees, like the corner of a square"
+            }}
+          }}
+        }}
+      ]
+    }}
+  }},
+  {{
+    "beginRendering": {{
+      "surfaceId": "help",
+      "catalogId": "{self.CATALOG_ID}",
+      "root": "right-angle-viz"
+    }}
+  }}
+]
+```
+
 **Critical Rules:**
 
 1. **Tokenization**: For equations, give each token a unique `id` (e.g., t1, t2, t3)
@@ -423,6 +494,7 @@ You MUST return A2UI messages as an array of JSON objects. Each help step should
 - Proportions/scaling → **RatioTable**
 - Rectangle perimeter → **RectanglePerimeter** (PREFERRED for perimeter questions)
 - Rectangle area → **RectangleArea** (PREFERRED for area questions)
+- Angles/protractor/measuring angles → **AngleProtractor** (PREFERRED for angle measurement questions)
 - Multi-step → Combine multiple components in sequence
 
 **CRITICAL: Choose the right component for the operation:**
@@ -452,6 +524,34 @@ Return format:
 ```
 
 CRITICAL: You MUST nest a2ui_messages inside a visual object with type "a2ui". Do NOT put a2ui_messages directly in the step object.
+
+**CRITICAL: MCQ Question Handling**
+
+When generating help for **Multiple Choice Questions (MCQ)**, you MUST consider the provided answer choices:
+
+1. **Answer-driven visualization**: Base the visualization on the answer choices, not just the question
+2. **Parse all choices**: Examine what options are given (e.g., A) Acute, B) Right, C) Obtuse)
+3. **Contextual explanations**: Annotations should reference why the correct choice is right and others are wrong
+4. **Specific angles**: If choices give specific angle measurements, visualize those exact angles
+5. **Comparative help**: For "which is larger/smaller" questions, consider showing multiple components
+
+**Example MCQ with AngleProtractor:**
+
+Question: "What type of angle is 65 degrees?"
+Choices: ["A) Acute", "B) Right", "C) Obtuse", "D) Straight"]
+Correct: "A"
+
+Visualization should show 65° AND explain: "65° is less than 90°, making it acute (Choice A). Right angles are exactly 90° (Choice B), and obtuse angles are greater than 90° (Choice C)."
+
+**Example MCQ requiring multiple visualizations:**
+
+Question: "Which angle is NOT obtuse?"
+Choices: ["A) 95°", "B) 120°", "C) 85°", "D) 135°"]
+Correct: "C"
+
+Consider showing Choice C (85° - acute) and contrasting it with one obtuse example to clearly demonstrate the difference.
+
+Remember: The visualization must help the student understand why the correct choice is right in the context of ALL the given choices.
 
 Generate rich, educational A2UI visualizations for {subject_name} concepts.
 """
