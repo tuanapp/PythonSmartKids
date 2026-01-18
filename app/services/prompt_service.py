@@ -625,7 +625,8 @@ class PromptService:
             subject_name: Subject name for prompt context
             user_answer: User's submitted answer (only when has_answered=True)
             has_answered: Whether user has already submitted an answer
-            visual_preference: 'text' (no visuals), 'json' (force JSON shapes), 'svg' (force AI SVG)
+            visual_preference: 'text' (no visuals), 'json' (force JSON shapes), 'svg' (force AI SVG), 'a2ui' (declarative components)
+            student_grade_level: Student's grade level for tone adjustment
             
         Returns:
             Dictionary with:
@@ -634,6 +635,7 @@ class PromptService:
                 - has_answered: bool - Echo of input flag
                 - visual_count: int - Number of JSON visual aids included
                 - svg_count: int - Number of AI-generated SVG aids included
+                - a2ui_count: int - Number of A2UI components included (if visual_preference='a2ui')
         """
         from openai import OpenAI
         from app.config import (
@@ -647,6 +649,7 @@ class PromptService:
             FF_HELP_VISUAL_SVG_FROM_AI_MAX
         )
         from app.services.ai_service import get_models_to_try
+        from app.services.a2ui_help_service import a2ui_help_service
         import json
         
         try:
@@ -689,16 +692,30 @@ class PromptService:
                 # User wants AI-generated SVG - force at least 1, disable JSON
                 final_json_max = 0
                 final_svg_max = max(final_svg_max, 2)  # Ensure minimum 2 SVGs
+            elif visual_preference == 'a2ui':
+                # A2UI mode: disable traditional visuals, use A2UI service
+                final_json_max = 0
+                final_svg_max = 0
+                logger.info(f"A2UI mode enabled for subject {subject_name} - using declarative components")
             
             logger.info(f"Help visual limits for subject {subject_name} (preference={visual_preference}): JSON={final_json_max}, SVG={final_svg_max}")
             
             # Determine if visuals are required or optional
-            visual_required = visual_preference in ['json', 'svg']
+            visual_required = visual_preference in ['json', 'svg', 'a2ui']
             visual_requirement_text = "**REQUIRED**" if visual_required else "OPTIONAL - use sparingly when they genuinely help understanding"
             
             # Build visual instructions for AI
             visual_instructions = ""
-            if final_json_max > 0 or final_svg_max > 0:
+            
+            # A2UI mode: use A2UI service for instructions
+            if visual_preference == 'a2ui':
+                visual_instructions = a2ui_help_service.get_a2ui_prompt_instructions(
+                    subject_name=subject_name,
+                    complexity=None  # Will be determined by AI
+                )
+            
+            # Traditional visual modes (JSON/SVG)
+            elif final_json_max > 0 or final_svg_max > 0:
                 visual_instructions = f"""
 **Visual Aids** ({visual_requirement_text}):
 You {"MUST" if visual_required else "may"} include up to {final_json_max} JSON-based visual aids and {final_svg_max} AI-generated SVG aids across ALL steps.
@@ -890,6 +907,7 @@ Return ONLY the JSON object, no additional text.
                         # Count visual aids
                         visual_count = 0
                         svg_count = 0
+                        a2ui_count = 0
                         
                         for step in help_data["help_steps"]:
                             if "visual" in step and step["visual"]:
@@ -898,6 +916,21 @@ Return ONLY the JSON object, no additional text.
                                     visual_count += 1
                                 elif visual_type == "svg_code":
                                     svg_count += 1
+                                elif visual_type == "a2ui":
+                                    # Count A2UI components from messages
+                                    a2ui_messages = step["visual"].get("a2ui_messages", [])
+                                    
+                                    # Validate A2UI messages if present
+                                    if a2ui_messages:
+                                        validation = a2ui_help_service.validate_a2ui_messages(a2ui_messages)
+                                        
+                                        if validation["valid"]:
+                                            a2ui_count += validation["component_count"]
+                                            logger.info(f"Valid A2UI in step {step['step_number']}: {validation['component_count']} components")
+                                        else:
+                                            logger.warning(f"Invalid A2UI in step {step['step_number']}: {validation['error']}")
+                                            # Remove invalid A2UI visual
+                                            del step["visual"]
                         
                         # Enforce visual limits (truncate if AI exceeded)
                         if visual_count > final_json_max or svg_count > final_svg_max:
@@ -933,7 +966,7 @@ Return ONLY the JSON object, no additional text.
                             f"Help generated successfully with {model_name} for uid={uid}, "
                             f"subject={subject_name}, steps={step_count}, "
                             f"complexity={complexity_assessment or 'not_assessed'}, "
-                            f"visuals: JSON={visual_count}, SVG={svg_count}"
+                            f"visuals: JSON={visual_count}, SVG={svg_count}, A2UI={a2ui_count}"
                         )
                         
                         # Return successful result with full AI request/response for logging
@@ -943,6 +976,7 @@ Return ONLY the JSON object, no additional text.
                             "has_answered": has_answered,
                             "visual_count": visual_count,
                             "svg_count": svg_count,
+                            "a2ui_count": a2ui_count,
                             "complexity_assessment": complexity_assessment,  # NEW: AI-assessed complexity
                             "step_count": step_count,  # NEW: Explicit step count
                             "ai_model": model_name,
