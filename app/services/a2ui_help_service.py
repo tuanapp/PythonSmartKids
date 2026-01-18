@@ -35,6 +35,14 @@ class A2UIHelpService:
             "description": "Ratio/proportion table with highlighting",
             "use_cases": ["ratios", "proportions", "scaling", "equivalent ratios"]
         },
+        "RectanglePerimeter": {
+            "description": "Rectangle with labeled dimensions showing perimeter calculation",
+            "use_cases": ["perimeter", "rectangle perimeter", "perimeter of rectangle", "distance around"]
+        },
+        "RectangleArea": {
+            "description": "Rectangle with grid overlay showing area calculation",
+            "use_cases": ["area", "rectangle area", "area of rectangle", "unit squares", "square units"]
+        },
         # Narrative/layout primitives
         "ExplainCard": {
             "description": "Container with title and learning objective",
@@ -97,7 +105,17 @@ You MUST generate declarative A2UI components for visual explanations.
    - Use for: Ratios, proportions, scaling
    - Props: columns (array), rows (2D array), highlight (array of {{row, col}}), caption?
 
-6. **ExplainCard**, **StepList**, **MathText** - Layout/narrative primitives
+6. **RectanglePerimeter** - Rectangle with labeled dimensions showing perimeter
+   - Use for: Perimeter of rectangle questions, distance around shapes
+   - Props: length (number), width (number), showFormula? (boolean, default true), unit? (string, default "cm")
+   - Example: {{"RectanglePerimeter": {{"length": 8, "width": 5, "showFormula": true, "unit": "cm"}}}}
+
+7. **RectangleArea** - Rectangle with grid overlay showing area
+   - Use for: Area of rectangle questions, square units, counting squares
+   - Props: length (number), width (number), showFormula? (boolean, default true), showGrid? (boolean, default true), unit? (string, default "cm")
+   - Example: {{"RectangleArea": {{"length": 8, "width": 5, "showFormula": true, "showGrid": true, "unit": "cm"}}}}
+
+8. **ExplainCard**, **StepList**, **MathText** - Layout/narrative primitives
 
 **A2UI Message Format (JSONL):**
 
@@ -166,6 +184,71 @@ You MUST return A2UI messages as an array of JSON objects. Each help step should
 ]
 ```
 
+**Example for "What is the perimeter of a rectangle with length 8 cm and width 5 cm?":**
+
+```json
+[
+  {{
+    "surfaceUpdate": {{
+      "surfaceId": "help",
+      "components": [
+        {{
+          "id": "perimeter-viz",
+          "component": {{
+            "RectanglePerimeter": {{
+              "length": 8,
+              "width": 5,
+              "showFormula": true,
+              "unit": "cm"
+            }}
+          }}
+        }}
+      ]
+    }}
+  }},
+  {{
+    "beginRendering": {{
+      "surfaceId": "help",
+      "catalogId": "{self.CATALOG_ID}",
+      "root": "perimeter-viz"
+    }}
+  }}
+]
+```
+
+**Example for "What is the area of a rectangle with length 8 cm and width 5 cm?":**
+
+```json
+[
+  {{
+    "surfaceUpdate": {{
+      "surfaceId": "help",
+      "components": [
+        {{
+          "id": "area-viz",
+          "component": {{
+            "RectangleArea": {{
+              "length": 8,
+              "width": 5,
+              "showFormula": true,
+              "showGrid": true,
+              "unit": "cm"
+            }}
+          }}
+        }}
+      ]
+    }}
+  }},
+  {{
+    "beginRendering": {{
+      "surfaceId": "help",
+      "catalogId": "{self.CATALOG_ID}",
+      "root": "area-viz"
+    }}
+  }}
+]
+```
+
 **Critical Rules:**
 
 1. **Tokenization**: For equations, give each token a unique `id` (e.g., t1, t2, t3)
@@ -182,6 +265,8 @@ You MUST return A2UI messages as an array of JSON objects. Each help step should
 - Addition/subtraction/integers → **NumberLineJump**
 - Fractions/ratios/percent → **BarModel** or **FractionSimplify**
 - Proportions/scaling → **RatioTable**
+- Rectangle perimeter → **RectanglePerimeter** (PREFERRED for perimeter questions)
+- Rectangle area → **RectangleArea** (PREFERRED for area questions)
 - Multi-step → Combine multiple components in sequence
 
 **Integration with help_steps:**
